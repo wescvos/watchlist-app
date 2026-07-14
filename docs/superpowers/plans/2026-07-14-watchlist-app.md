@@ -726,8 +726,8 @@ git add -A && git commit -m "feat: add fetch-and-merge service combining TMDb + 
 - Consumes: `prisma` (Task 2), `fetchMergedTitle` (Task 6).
 - Produces:
   - `isStale(fetchedAt: Date, now?: Date): boolean` (true if older than 30 days)
-  - `addTitle(tmdbId, mediaType): Promise<Title>` (fetch+merge+upsert with status default WANT)
-  - `listTitles(status?: Status): Promise<Title[]>`
+  - `addTitle(tmdbId, mediaType, status?=WANT): Promise<Title>` (fetch+merge+upsert; create sets status and, when WATCHED, watchedAt=now)
+  - `listTitles(status?: Status): Promise<Title[]>` (WATCHED sorted by watchedAt desc; WANT/unfiltered by addedAt desc)
   - `getTitle(id): Promise<Title|null>`
   - `updateTitle(id, { status?, note?, myRating? }): Promise<Title>` (sets `watchedAt` when moving to WATCHED)
   - `refreshTitle(id): Promise<Title>` (re-fetch external data, keep user fields)
@@ -793,20 +793,36 @@ function toData(m: MergedTitle) {
   };
 }
 
-export async function addTitle(tmdbId: number, mediaType: MediaKind): Promise<Title> {
+export async function addTitle(
+  tmdbId: number,
+  mediaType: MediaKind,
+  status: Status = Status.WANT,
+): Promise<Title> {
   const merged = await fetchMergedTitle(tmdbId, mediaType);
   const data = toData(merged);
   return prisma.title.upsert({
     where: { tmdbId_mediaType: { tmdbId, mediaType } },
-    update: data, // refresh cached metadata; leave user fields (status/note/myRating) untouched
-    create: { ...data, status: Status.WANT },
+    // Re-adding refreshes cached metadata only; user fields
+    // (status/note/myRating/watchedAt) are left untouched.
+    update: data,
+    create: {
+      ...data,
+      status,
+      watchedAt: status === Status.WATCHED ? new Date() : null,
+    },
   });
 }
 
 export function listTitles(status?: Status): Promise<Title[]> {
+  // Watched: most recently watched first (addedAt as tiebreaker).
+  // Want / unfiltered: most recently added first.
+  const orderBy =
+    status === Status.WATCHED
+      ? [{ watchedAt: "desc" as const }, { addedAt: "desc" as const }]
+      : { addedAt: "desc" as const };
   return prisma.title.findMany({
     where: status ? { status } : undefined,
-    orderBy: { addedAt: "desc" },
+    orderBy,
   });
 }
 
@@ -864,7 +880,7 @@ git add -A && git commit -m "feat: add titles repository with 30-day staleness h
 - Produces HTTP endpoints:
   - `GET /api/search?q=` → `SearchResult[]`
   - `GET /api/titles?status=WANT|WATCHED` → `Title[]`
-  - `POST /api/titles` body `{ tmdbId, mediaType }` → `Title`
+  - `POST /api/titles` body `{ tmdbId, mediaType, status?: "WANT"|"WATCHED" }` → `Title`
   - `PATCH /api/titles/:id` body `{ status?, note?, myRating? }` → `Title`
   - `DELETE /api/titles/:id` → `{ ok: true }`
   - `POST /api/titles/:id/refresh` → `Title`
@@ -935,11 +951,12 @@ export async function POST(req: Request) {
   const body = await req.json().catch(() => null);
   const tmdbId = Number(body?.tmdbId);
   const mediaType = body?.mediaType as MediaKind;
+  const status: Status = body?.status === "WATCHED" ? Status.WATCHED : Status.WANT;
   if (!tmdbId || (mediaType !== "MOVIE" && mediaType !== "TV")) {
     return NextResponse.json({ error: "tmdbId and mediaType required" }, { status: 400 });
   }
   try {
-    return NextResponse.json(await addTitle(tmdbId, mediaType));
+    return NextResponse.json(await addTitle(tmdbId, mediaType, status));
   } catch {
     return NextResponse.json({ error: "Add failed" }, { status: 502 });
   }
@@ -1013,12 +1030,14 @@ git add -A && git commit -m "feat: add API routes for search, titles CRUD, and r
 ## Task 9: Passcode gate
 
 **Files:**
-- Create: `src/middleware.ts`, `src/app/api/auth/route.ts`, `src/app/gate/page.tsx`
+- Create: `src/lib/hash.ts`, `src/middleware.ts`, `src/app/api/auth/route.ts`, `src/app/gate/page.tsx`
 - Test: `src/app/api/__tests__/auth.test.ts`
 
 **Interfaces:**
 - Consumes: `env.passcode` (Task 3).
-- Produces: cookie-based gate. `POST /api/auth` body `{ passcode }` sets an httpOnly cookie `wl_auth` on success. Middleware redirects unauthenticated page/API requests (except `/gate` and `/api/auth`) to `/gate`.
+- Produces:
+  - `sha256Hex(input: string): Promise<string>` — shared hash helper (works in both the Node route-handler runtime and the Edge middleware runtime).
+  - cookie-based gate: `POST /api/auth` body `{ passcode }` sets an httpOnly cookie `wl_auth` containing the **SHA-256 hash** of the passcode on success. Middleware redirects unauthenticated page/API requests (except `/gate` and `/api/auth`) to `/gate`, comparing the cookie hash against the hash of `APP_PASSCODE` (the raw passcode is never stored in the cookie).
 
 - [ ] **Step 1: Write the failing auth-route test**
 
@@ -1046,12 +1065,28 @@ describe("POST /api/auth", () => {
 
 Run: `npm test -- auth`. Expected: FAIL.
 
-- [ ] **Step 3: Implement the auth route**
+- [ ] **Step 3: Create the shared hash helper**
+
+Create `src/lib/hash.ts`:
+```ts
+// Uses Web Crypto (globalThis.crypto.subtle), available in both the Node
+// route-handler runtime and the Edge middleware runtime.
+export async function sha256Hex(input: string): Promise<string> {
+  const data = new TextEncoder().encode(input);
+  const digest = await crypto.subtle.digest("SHA-256", data);
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+```
+
+- [ ] **Step 4: Implement the auth route**
 
 Create `src/app/api/auth/route.ts`:
 ```ts
 import { NextResponse } from "next/server";
 import { env } from "@/lib/env";
+import { sha256Hex } from "@/lib/hash";
 
 export async function POST(req: Request) {
   const body = await req.json().catch(() => ({}));
@@ -1059,7 +1094,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Incorrect passcode" }, { status: 401 });
   }
   const res = NextResponse.json({ ok: true });
-  res.cookies.set("wl_auth", env.passcode, {
+  res.cookies.set("wl_auth", await sha256Hex(env.passcode), {
     httpOnly: true,
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
@@ -1070,19 +1105,21 @@ export async function POST(req: Request) {
 }
 ```
 
-- [ ] **Step 4: Implement middleware**
+- [ ] **Step 5: Implement middleware**
 
 Create `src/middleware.ts`:
 ```ts
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { sha256Hex } from "@/lib/hash";
 
-export function middleware(req: NextRequest) {
+export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
   const isPublic = pathname === "/gate" || pathname === "/api/auth";
   if (isPublic) return NextResponse.next();
 
-  const authed = req.cookies.get("wl_auth")?.value === process.env.APP_PASSCODE;
+  const expected = await sha256Hex(process.env.APP_PASSCODE ?? "");
+  const authed = req.cookies.get("wl_auth")?.value === expected;
   if (authed) return NextResponse.next();
 
   if (pathname.startsWith("/api/")) {
@@ -1098,7 +1135,7 @@ export const config = {
 };
 ```
 
-- [ ] **Step 5: Implement the gate page**
+- [ ] **Step 6: Implement the gate page**
 
 Create `src/app/gate/page.tsx`:
 ```tsx
@@ -1139,15 +1176,15 @@ export default function GatePage() {
 }
 ```
 
-- [ ] **Step 6: Run tests + manual check**
+- [ ] **Step 7: Run tests + manual check**
 
 Run: `npm test -- auth`. Expected: PASS.
 Run `npm run dev`, visit `/` → should redirect to `/gate`. Enter the passcode → lands on home. Stop server.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
-git add -A && git commit -m "feat: add passcode gate (middleware, auth route, gate page)"
+git add -A && git commit -m "feat: add passcode gate (hashed cookie, middleware, auth route, gate page)"
 ```
 
 ---
@@ -1322,11 +1359,11 @@ export default function Search() {
     setBusy(false);
   }
 
-  async function add(r: Result) {
+  async function add(r: Result, status: "WANT" | "WATCHED") {
     setAdding(r.tmdbId);
     const res = await fetch("/api/titles", {
       method: "POST",
-      body: JSON.stringify({ tmdbId: r.tmdbId, mediaType: r.mediaType }),
+      body: JSON.stringify({ tmdbId: r.tmdbId, mediaType: r.mediaType, status }),
     });
     setAdding(null);
     if (res.ok) { const t = await res.json(); router.push(`/title/${t.id}`); }
@@ -1355,10 +1392,16 @@ export default function Search() {
               <p className="truncate font-medium">{r.title}</p>
               <p className="text-xs text-gray-500">{r.mediaType === "TV" ? "TV" : "Movie"}{r.year ? ` · ${r.year}` : ""}</p>
             </div>
-            <button onClick={() => add(r)} disabled={adding === r.tmdbId}
-              className="rounded-lg bg-black px-3 py-2 text-sm text-white disabled:opacity-50">
-              {adding === r.tmdbId ? "Adding…" : "Add"}
-            </button>
+            <div className="flex flex-shrink-0 flex-col gap-1">
+              <button onClick={() => add(r, "WANT")} disabled={adding === r.tmdbId}
+                className="rounded-lg bg-black px-3 py-1.5 text-xs text-white disabled:opacity-50">
+                + Want
+              </button>
+              <button onClick={() => add(r, "WATCHED")} disabled={adding === r.tmdbId}
+                className="rounded-lg border px-3 py-1.5 text-xs disabled:opacity-50">
+                + Watched
+              </button>
+            </div>
           </li>
         ))}
       </ul>
@@ -1644,16 +1687,23 @@ In the project's Settings → Environment Variables, add (Production + Preview +
 - `APP_PASSCODE`
 - `DATABASE_URL` (the Neon connection string)
 
-- [ ] **Step 4: Ensure migrations run on deploy**
+- [ ] **Step 4: Ensure Prisma client + migrations run on deploy**
 
-In `package.json`, set the build script to run migrations first:
+In `package.json`, set these scripts so the Prisma client is regenerated
+against Vercel's cached dependencies (otherwise `migrate deploy` alone fails
+because the client is never regenerated) and migrations apply during build:
 ```json
-"build": "prisma migrate deploy && next build"
+"postinstall": "prisma generate",
+"build": "prisma generate && prisma migrate deploy && next build"
 ```
 Commit and push:
 ```bash
-git add package.json && git commit -m "chore: run prisma migrate deploy during Vercel build" && git push
+git add package.json && git commit -m "chore: regenerate Prisma client and run migrations during Vercel build" && git push
 ```
+
+> **If `prisma migrate deploy` fails on Vercel:** switch `DATABASE_URL` to Neon's
+> **direct (non-pooled)** connection string. This is a single-user app, so
+> connection pooling isn't needed anyway.
 
 - [ ] **Step 5: Deploy and smoke-test**
 
