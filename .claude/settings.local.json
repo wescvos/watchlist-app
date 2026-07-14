@@ -1,7 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "PowerShell($node = \\(Get-Command node -ErrorAction SilentlyContinue\\); if \\($node\\) { \"node: $\\($node.Source\\)\"; node --version } else { \"node: NOT FOUND\" }; $npm = \\(Get-Command npm -ErrorAction SilentlyContinue\\); if \\($npm\\) { \"npm: $\\($npm.Source\\)\"; npm --version } else { \"npm: NOT FOUND\" }; $winget = \\(Get-Command winget -ErrorAction SilentlyContinue\\); if \\($winget\\) { \"winget: available\" } else { \"winget: NOT FOUND\" })"
-    ]
-  }
-}
