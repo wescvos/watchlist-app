@@ -1,0 +1,45 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum MediaType {
+  MOVIE
+  TV
+}
+
+enum Status {
+  WANT
+  WATCHED
+}
+
+model Title {
+  id              String    @id @default(cuid())
+  tmdbId          Int
+  mediaType       MediaType
+  imdbId          String?
+  title           String
+  year            Int?
+  posterUrl       String?
+  overview        String?
+  runtime         Int?
+  genres          String[]
+  cast            Json      @default("[]")
+  director        String?
+  tmdbScore       Float?
+  imdbScore       String?
+  rtScore         String?
+  metacriticScore String?
+  fetchedAt       DateTime  @default(now())
+
+  status          Status    @default(WANT)
+  note            String?
+  myRating        Int?
+  addedAt         DateTime  @default(now())
+  watchedAt       DateTime?
+
+  @@unique([tmdbId, mediaType])
+}
