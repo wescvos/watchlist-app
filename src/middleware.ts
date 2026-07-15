@@ -7,8 +7,11 @@ export async function middleware(req: NextRequest) {
   const isPublic = pathname === "/gate" || pathname === "/api/auth";
   if (isPublic) return NextResponse.next();
 
-  const expected = await sha256Hex(process.env.APP_PASSCODE ?? "");
-  const authed = req.cookies.get("wl_auth")?.value === expected;
+  const passcode = process.env.APP_PASSCODE;
+  const cookie = req.cookies.get("wl_auth")?.value;
+  // Fail closed: with no configured passcode, deny everything rather than
+  // deriving a guessable hash from an empty string.
+  const authed = !!passcode && !!cookie && cookie === (await sha256Hex(passcode));
   if (authed) return NextResponse.next();
 
   if (pathname.startsWith("/api/")) {
