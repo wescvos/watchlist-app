@@ -23,6 +23,11 @@ describe("searchTitles", () => {
       { tmdbId: 2, mediaType: "TV", title: "Severance", year: 2022, posterUrl: null },
     ]);
   });
+
+  it("throws when TMDb returns a non-2xx status", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValueOnce(new Response("err", { status: 500 }));
+    await expect(searchTitles("x")).rejects.toThrow(/failed: 500/);
+  });
 });
 
 describe("getTitleDetails", () => {
@@ -44,5 +49,26 @@ describe("getTitleDetails", () => {
     expect(out.cast[0]).toEqual({ name: "Timothée", character: "Paul" });
     expect(out.tmdbScore).toBe(8.0);
     expect(out.runtime).toBe(155);
+  });
+
+  it("merges details for a TV series (name, first_air_date, episode_run_time)", async () => {
+    mockFetchOnce({
+      id: 2, name: "Severance", first_air_date: "2022-02-18", poster_path: "/b.jpg",
+      overview: "Work.", episode_run_time: [50], vote_average: 8.4,
+      genres: [{ name: "Drama" }, { name: "Sci-Fi" }],
+      external_ids: { imdb_id: "tt11280740" },
+      credits: {
+        cast: [{ name: "Adam Scott", character: "Mark" }],
+        crew: [{ job: "Director", name: "Ben Stiller" }],
+      },
+    });
+    const out = await getTitleDetails(2, "TV");
+    expect(out.title).toBe("Severance");
+    expect(out.year).toBe(2022);
+    expect(out.runtime).toBe(50);
+    expect(out.imdbId).toBe("tt11280740");
+    expect(out.genres).toEqual(["Drama", "Sci-Fi"]);
+    expect(out.cast[0]).toEqual({ name: "Adam Scott", character: "Mark" });
+    expect(out.tmdbScore).toBe(8.4);
   });
 });
