@@ -6,7 +6,7 @@ export async function GET(req: Request) {
   if (!q) return NextResponse.json({ error: "Missing q" }, { status: 400 });
   try {
     return NextResponse.json(await searchTitles(q));
-  } catch (e) {
+  } catch {
     return NextResponse.json({ error: "Search failed" }, { status: 502 });
   }
 }
