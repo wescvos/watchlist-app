@@ -1,1 +1,13 @@
+# Normalize all text files to LF (stops CRLF conversion warnings on Windows).
 * text=eol=lf
+
+# Protect binary assets from EOL normalization (which would corrupt them).
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.ico binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
