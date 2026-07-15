@@ -15,6 +15,12 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Watchlist",
   description: "Personal movie & series watchlist",
+  manifest: "/manifest.webmanifest",
+  appleWebApp: {
+    capable: true,
+    title: "Watchlist",
+    statusBarStyle: "black-translucent",
+  },
 };
 
 export const viewport = {
