@@ -8,6 +8,15 @@ export interface SearchResult {
   posterUrl: string | null;
 }
 
+export interface LibraryMatch {
+  id: string;
+  status: "WANT" | "WATCHED";
+}
+
+export interface SearchResultWithLibrary extends SearchResult {
+  library: LibraryMatch | null;
+}
+
 export interface CastMember {
   name: string;
   character: string;
