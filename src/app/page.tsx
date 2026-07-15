@@ -10,12 +10,20 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let ignore = false;
     // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional loading flag for fetch-on-status-change
     setLoading(true);
     fetch(`/api/titles?status=${status}`)
       .then((r) => r.json())
-      .then((data) => setTitles(data))
-      .finally(() => setLoading(false));
+      .then((data) => {
+        if (!ignore) setTitles(data);
+      })
+      .finally(() => {
+        if (!ignore) setLoading(false);
+      });
+    return () => {
+      ignore = true;
+    };
   }, [status]);
 
   return (
