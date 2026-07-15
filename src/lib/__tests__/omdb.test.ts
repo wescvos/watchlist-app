@@ -31,4 +31,21 @@ describe("getScoresByImdbId", () => {
     const out = await getScoresByImdbId("tt0");
     expect(out).toEqual({ imdbScore: null, rtScore: null, metacriticScore: null });
   });
+
+  it("treats N/A values as null across all three scores", async () => {
+    mockFetchOnce({
+      Response: "True",
+      imdbRating: "N/A",
+      Metascore: "N/A",
+      Ratings: [{ Source: "Rotten Tomatoes", Value: "N/A" }],
+    });
+    const out = await getScoresByImdbId("tt1");
+    expect(out).toEqual({ imdbScore: null, rtScore: null, metacriticScore: null });
+  });
+
+  it("returns nulls when the response body is not valid JSON", async () => {
+    vi.spyOn(global, "fetch").mockResolvedValueOnce(new Response("<html>not json", { status: 200 }));
+    const out = await getScoresByImdbId("tt1");
+    expect(out).toEqual({ imdbScore: null, rtScore: null, metacriticScore: null });
+  });
 });

@@ -15,7 +15,12 @@ export async function getScoresByImdbId(imdbId: string): Promise<OmdbScores> {
 
   const res = await fetch(url.toString());
   if (!res.ok) return EMPTY;
-  const data = await res.json();
+  let data: any;
+  try {
+    data = await res.json();
+  } catch {
+    return EMPTY;
+  }
   if (data.Response !== "True") return EMPTY;
 
   const ratings: { Source: string; Value: string }[] = data.Ratings ?? [];
@@ -23,7 +28,7 @@ export async function getScoresByImdbId(imdbId: string): Promise<OmdbScores> {
 
   return {
     imdbScore: data.imdbRating && data.imdbRating !== "N/A" ? data.imdbRating : null,
-    rtScore: rt,
+    rtScore: rt && rt !== "N/A" ? rt : null,
     metacriticScore: data.Metascore && data.Metascore !== "N/A" ? data.Metascore : null,
   };
 }
