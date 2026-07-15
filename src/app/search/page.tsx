@@ -10,12 +10,14 @@ export default function Search() {
   const [results, setResults] = useState<Result[]>([]);
   const [busy, setBusy] = useState(false);
   const [adding, setAdding] = useState<number | null>(null);
+  const [addError, setAddError] = useState("");
   const router = useRouter();
 
   async function run(e: React.FormEvent) {
     e.preventDefault();
     if (!q.trim()) return;
     setBusy(true);
+    setAddError("");
     const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
     setResults(res.ok ? await res.json() : []);
     setBusy(false);
@@ -23,12 +25,23 @@ export default function Search() {
 
   async function add(r: Result, status: "WANT" | "WATCHED") {
     setAdding(r.tmdbId);
-    const res = await fetch("/api/titles", {
-      method: "POST",
-      body: JSON.stringify({ tmdbId: r.tmdbId, mediaType: r.mediaType, status }),
-    });
-    setAdding(null);
-    if (res.ok) { const t = await res.json(); router.push(`/title/${t.id}`); }
+    setAddError("");
+    try {
+      const res = await fetch("/api/titles", {
+        method: "POST",
+        body: JSON.stringify({ tmdbId: r.tmdbId, mediaType: r.mediaType, status }),
+      });
+      if (res.ok) {
+        const t = await res.json();
+        router.push(`/title/${t.id}`);
+        return;
+      }
+      setAddError(`Couldn't add "${r.title}". Please try again.`);
+    } catch {
+      setAddError(`Couldn't add "${r.title}". Please try again.`);
+    } finally {
+      setAdding(null);
+    }
   }
 
   return (
@@ -43,6 +56,7 @@ export default function Search() {
         <button className="rounded-lg bg-black px-4 text-white">Go</button>
       </form>
       {busy && <p className="text-center text-sm text-gray-500">Searching…</p>}
+      {addError && <p className="mb-2 text-sm text-red-600">{addError}</p>}
       <ul className="space-y-2">
         {results.map((r) => (
           <li key={`${r.mediaType}-${r.tmdbId}`} className="flex items-center gap-3 rounded-lg border p-2">
