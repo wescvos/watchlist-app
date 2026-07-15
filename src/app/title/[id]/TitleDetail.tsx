@@ -27,31 +27,65 @@ export function TitleDetail({ title }: { title: Title }) {
   const [note, setNote] = useState(title.note ?? "");
   const [myRating, setMyRating] = useState<number | "">(title.myRating ?? "");
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
 
-  async function patch(body: Record<string, unknown>) {
+  async function patch(body: Record<string, unknown>): Promise<boolean> {
     setSaving(true);
-    await fetch(`/api/titles/${title.id}`, { method: "PATCH", body: JSON.stringify(body) });
-    setSaving(false);
-    router.refresh();
+    setError("");
+    try {
+      const res = await fetch(`/api/titles/${title.id}`, { method: "PATCH", body: JSON.stringify(body) });
+      if (!res.ok) {
+        setError("Couldn't save. Please try again.");
+        return false;
+      }
+      router.refresh();
+      return true;
+    } catch {
+      setError("Couldn't save. Please try again.");
+      return false;
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function toggleStatus() {
+    const prev = status;
     const next = status === "WANT" ? "WATCHED" : "WANT";
     setStatus(next);
-    await patch({ status: next });
+    const ok = await patch({ status: next });
+    if (!ok) setStatus(prev);
   }
 
   async function refresh() {
     setSaving(true);
-    await fetch(`/api/titles/${title.id}/refresh`, { method: "POST" });
-    setSaving(false);
-    router.refresh();
+    setError("");
+    try {
+      const res = await fetch(`/api/titles/${title.id}/refresh`, { method: "POST" });
+      if (!res.ok) {
+        setError("Refresh failed. Please try again.");
+        return;
+      }
+      router.refresh();
+    } catch {
+      setError("Refresh failed. Please try again.");
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function remove() {
     if (!confirm("Remove this title?")) return;
-    await fetch(`/api/titles/${title.id}`, { method: "DELETE" });
-    router.push("/");
+    setError("");
+    try {
+      const res = await fetch(`/api/titles/${title.id}`, { method: "DELETE" });
+      if (!res.ok) {
+        setError("Couldn't remove. Please try again.");
+        return;
+      }
+      router.push("/");
+    } catch {
+      setError("Couldn't remove. Please try again.");
+    }
   }
 
   return (
@@ -127,6 +161,8 @@ export function TitleDetail({ title }: { title: Title }) {
           Save note
         </button>
       </div>
+
+      {error && <p className="mt-4 text-sm text-red-600">{error}</p>}
 
       {/* Actions */}
       <div className="mt-6 flex flex-wrap gap-2">
