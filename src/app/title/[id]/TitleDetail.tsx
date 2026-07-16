@@ -2,8 +2,11 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { BackLink } from "@/components/BackLink";
+import { TitleHeader } from "@/components/TitleHeader";
+import { ExternalRatings } from "@/components/ExternalRatings";
+import { CastCarousel } from "@/components/CastCarousel";
+import type { CastMember } from "@/lib/types";
 
-interface CastMember { name: string; character: string; profileUrl: string | null; }
 interface Title {
   id: string; title: string; year: number | null; posterUrl: string | null;
   overview: string | null; runtime: number | null; genres: string[];
@@ -13,16 +16,7 @@ interface Title {
   fetchedAt: string; watchedAt: string | null;
 }
 
-const RATINGS = Array.from({ length: 11 }, (_, i) => i);
-
-function Rating({ label, value }: { label: string; value: string | number | null }) {
-  return (
-    <div className="rounded-lg bg-gray-100 px-3 py-2 text-center dark:bg-white/5">
-      <div className="meta">{label}</div>
-      <div className="font-mono font-semibold">{value ?? "N/A"}</div>
-    </div>
-  );
-}
+const RATINGS = Array.from({ length: 10 }, (_, i) => i + 1);
 
 function daysAgo(iso: string): number {
   const ms = Date.now() - new Date(iso).getTime();
@@ -158,32 +152,15 @@ export function TitleDetail({ title }: { title: Title }) {
     <main className="mx-auto w-full max-w-2xl p-4 pb-24 fade-in">
       <BackLink href="/" label="Back to watchlist" />
 
-      <div className="mt-3 flex gap-4">
-        <div className="h-48 w-32 flex-shrink-0 overflow-hidden rounded-lg bg-gray-200 ring-1 ring-black/5 dark:bg-white/10 dark:ring-white/10">
-          {title.posterUrl && /* eslint-disable-next-line @next/next/no-img-element */
-            <img src={title.posterUrl} alt={title.title} className="h-full w-full object-cover" />}
-        </div>
-        <div>
-          <h1 className="text-xl font-semibold">{title.title}</h1>
-          <p className="mt-0.5 meta">
-            {title.year ?? ""}{title.runtime ? ` · ${title.runtime} min` : ""}
-          </p>
-          {status === "WATCHED" && title.watchedAt && (
-            <p className="mt-0.5 meta">Watched {formatWatchedDate(title.watchedAt)}</p>
-          )}
-          {title.director && (
-            <div className="mt-2">
-              <p className="meta">Director</p>
-              <p className="text-sm">{title.director}</p>
-            </div>
-          )}
-          <div className="mt-2 flex flex-wrap gap-1">
-            {title.genres.map((g) => (
-              <span key={g} className="rounded-full bg-gray-100 px-2 py-0.5 meta dark:bg-white/10">{g}</span>
-            ))}
-          </div>
-        </div>
-      </div>
+      <TitleHeader
+        title={title.title}
+        year={title.year}
+        posterUrl={title.posterUrl}
+        runtime={title.runtime}
+        director={title.director}
+        genres={title.genres}
+        watchedDate={status === "WATCHED" && title.watchedAt ? formatWatchedDate(title.watchedAt) : null}
+      />
 
       {/* My rating — the key personal field */}
       <div className="mt-4 rounded-xl border border-black/10 p-3 dark:border-white/10">
@@ -191,7 +168,7 @@ export function TitleDetail({ title }: { title: Title }) {
           <label className="text-sm font-medium">My rating</label>
           {flash === "rating" && <span className="meta flash-caption">Saved</span>}
         </div>
-        <div className="mt-2 grid grid-cols-11 gap-1">
+        <div className="mt-2 grid grid-cols-10 gap-1">
           {RATINGS.map((n) => (
             <button
               key={n}
@@ -212,42 +189,16 @@ export function TitleDetail({ title }: { title: Title }) {
         </div>
       </div>
 
-      {/* External ratings */}
-      <div className="mt-4 grid grid-cols-4 gap-2">
-        <Rating label="TMDb" value={title.tmdbScore} />
-        <Rating label="IMDb" value={title.imdbScore} />
-        <Rating label="RT" value={title.rtScore} />
-        <Rating label="Meta" value={title.metacriticScore} />
-      </div>
+      <ExternalRatings
+        tmdbScore={title.tmdbScore}
+        imdbScore={title.imdbScore}
+        rtScore={title.rtScore}
+        metacriticScore={title.metacriticScore}
+      />
 
       {title.overview && <p className="mt-4 text-sm leading-relaxed">{title.overview}</p>}
 
-      {/* Cast */}
-      {title.cast.length > 0 && (
-        <div className="mt-4">
-          <h2 className="text-sm font-medium">Cast</h2>
-          <div className="-mx-4 mt-2 flex snap-x snap-mandatory gap-4 overflow-x-auto touch-pan-x overscroll-x-contain px-4 pb-1 [-webkit-overflow-scrolling:touch]">
-            {title.cast.map((c, i) => (
-              <div key={i} className="flex w-16 flex-shrink-0 snap-start flex-col items-center">
-                <div className="aspect-[2/3] w-16 flex-shrink-0 overflow-hidden rounded-lg bg-gray-200 ring-1 ring-black/5 dark:bg-white/10 dark:ring-white/10">
-                  {c.profileUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={c.profileUrl} alt={c.name} className="h-full w-full object-cover" />
-                  ) : (
-                    <div className="flex h-full items-center justify-center p-1 text-center meta">
-                      {c.name}
-                    </div>
-                  )}
-                </div>
-                <p className="mt-1.5 w-full truncate text-center meta">{c.name}</p>
-                {c.character && (
-                  <p className="w-full truncate text-center text-[11px] text-gray-400 dark:text-gray-500">{c.character}</p>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      <CastCarousel cast={title.cast} />
 
       {/* Note */}
       <div className="mt-4">

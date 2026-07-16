@@ -27,9 +27,9 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   }
   if ("myRating" in body) {
     const r = body.myRating;
-    const ok = r === null || (Number.isInteger(r) && r >= 0 && r <= 10);
+    const ok = r === null || (Number.isInteger(r) && r >= 1 && r <= 10);
     if (!ok) {
-      return NextResponse.json({ error: "myRating must be an integer 0-10 or null" }, { status: 400 });
+      return NextResponse.json({ error: "myRating must be an integer 1-10 or null" }, { status: 400 });
     }
     patch.myRating = r;
   }

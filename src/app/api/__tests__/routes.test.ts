@@ -44,6 +44,11 @@ describe("PATCH /api/titles/:id validation", () => {
     expect(res.status).toBe(400);
     expect(updateTitle).not.toHaveBeenCalled();
   });
+  it("400s on myRating of 0 (scale is 1-10, use null to clear)", async () => {
+    const res = await PATCH(patchReq({ myRating: 0 }), ctx);
+    expect(res.status).toBe(400);
+    expect(updateTitle).not.toHaveBeenCalled();
+  });
   it("400s on non-integer myRating", async () => {
     const res = await PATCH(patchReq({ myRating: 5.5 }), ctx);
     expect(res.status).toBe(400);

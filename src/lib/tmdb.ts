@@ -17,13 +17,40 @@ function yearOf(date?: string | null): number | null {
   return Number.isFinite(y) ? y : null;
 }
 
+class TmdbHttpError extends Error {
+  constructor(public status: number, pathname: string) {
+    super(`TMDb ${pathname} failed: ${status}`);
+  }
+}
+
+const RETRYABLE_STATUS = new Set([429, 500, 502, 503, 504]);
+const REQUEST_TIMEOUT_MS = 8000;
+const MAX_ATTEMPTS = 2;
+
+// TMDb is occasionally slow or transiently 5xx/timeouts; retry once and cap
+// the wait so a hung request fails on our terms instead of the platform's.
 async function tmdbGet(pathname: string, params: Record<string, string> = {}) {
   const url = new URL(`${BASE}${pathname}`);
   url.searchParams.set("api_key", env.tmdbKey);
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
-  const res = await fetch(url.toString());
-  if (!res.ok) throw new Error(`TMDb ${pathname} failed: ${res.status}`);
-  return res.json();
+
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+    try {
+      const res = await fetch(url.toString(), { signal: controller.signal });
+      if (res.ok) return await res.json();
+      if (attempt === MAX_ATTEMPTS || !RETRYABLE_STATUS.has(res.status)) {
+        throw new TmdbHttpError(res.status, pathname);
+      }
+    } catch (e) {
+      if (attempt === MAX_ATTEMPTS || e instanceof TmdbHttpError) throw e;
+    } finally {
+      clearTimeout(timeout);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 400));
+  }
+  throw new Error(`TMDb ${pathname} failed: exhausted retries`);
 }
 
 export async function searchTitles(q: string): Promise<SearchResult[]> {

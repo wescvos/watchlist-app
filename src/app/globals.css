@@ -42,6 +42,15 @@ body {
   .meta {
     @apply font-mono text-[11px] uppercase tracking-wide text-gray-500;
   }
+
+  /* Cross-browser scrollbar hiding for native-scroll carousels; scrolling itself is untouched. */
+  .scrollbar-hide {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 @keyframes flash-fade {

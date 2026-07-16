@@ -21,7 +21,8 @@ export async function GET(req: Request) {
       return { ...r, library: match ? { id: match.id, status: match.status } : null };
     });
     return NextResponse.json(withLibrary);
-  } catch {
+  } catch (e) {
+    console.error("Search failed:", e);
     return NextResponse.json({ error: "Search failed" }, { status: 502 });
   }
 }

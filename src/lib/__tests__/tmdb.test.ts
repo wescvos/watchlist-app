@@ -24,9 +24,27 @@ describe("searchTitles", () => {
     ]);
   });
 
-  it("throws when TMDb returns a non-2xx status", async () => {
-    vi.spyOn(global, "fetch").mockResolvedValueOnce(new Response("err", { status: 500 }));
+  it("retries once on a retryable status and succeeds", async () => {
+    const fetchSpy = vi.spyOn(global, "fetch")
+      .mockResolvedValueOnce(new Response("err", { status: 502 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ results: [] }), { status: 200 }));
+    const out = await searchTitles("x");
+    expect(out).toEqual([]);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("throws after exhausting retries on a persistent retryable status", async () => {
+    const fetchSpy = vi.spyOn(global, "fetch")
+      .mockResolvedValueOnce(new Response("err", { status: 500 }))
+      .mockResolvedValueOnce(new Response("err", { status: 500 }));
     await expect(searchTitles("x")).rejects.toThrow(/failed: 500/);
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not retry a non-retryable status", async () => {
+    const fetchSpy = vi.spyOn(global, "fetch").mockResolvedValueOnce(new Response("err", { status: 404 }));
+    await expect(searchTitles("x")).rejects.toThrow(/failed: 404/);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
   });
 });
 
