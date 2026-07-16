@@ -162,30 +162,57 @@ export function TitleDetail({ title }: { title: Title }) {
         watchedDate={status === "WATCHED" && title.watchedAt ? formatWatchedDate(title.watchedAt) : null}
       />
 
-      {/* My rating — the key personal field */}
-      <div className="mt-4 rounded-xl border border-black/10 p-3 dark:border-white/10">
-        <div className="flex items-center justify-between">
-          <label className="text-sm font-medium">My rating</label>
-          {flash === "rating" && <span className="meta flash-caption">Saved</span>}
+      {/* Rating only makes sense once watched — prompt to mark it watched instead. */}
+      {status === "WANT" && (
+        <div className="mt-4 rounded-xl border border-black/10 p-3 text-center dark:border-white/10">
+          <p className="text-sm text-gray-500">Rate it once you&rsquo;ve watched it.</p>
+          <button
+            type="button"
+            onClick={toggleStatus}
+            disabled={saving}
+            className="mt-2 rounded-lg bg-foreground px-4 py-2 text-sm font-medium text-background transition-opacity hover:opacity-90 active:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:opacity-50"
+          >
+            Mark as watched
+          </button>
         </div>
-        <div className="mt-2 grid grid-cols-10 gap-1">
-          {RATINGS.map((n) => (
-            <button
-              key={n}
-              type="button"
-              onClick={() => rate(n)}
-              disabled={saving}
-              aria-pressed={myRating === n}
-              aria-label={`Rate ${n} out of 10`}
-              className={`flex h-9 items-center justify-center rounded-lg font-mono text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground disabled:opacity-50 ${
-                myRating === n
-                  ? "bg-foreground text-background"
-                  : "text-gray-500 hover:bg-gray-100 active:bg-gray-100 dark:hover:bg-white/10 dark:active:bg-white/10"
-              }`}
-            >
-              {n}
-            </button>
-          ))}
+      )}
+
+      {/* My rating — the key personal field. Height+opacity(+small translate)
+          reveal on the WANT→WATCHED transition; a CSS transition only fires on
+          a value change, not on first paint, so this stays static on load. */}
+      <div
+        aria-hidden={status !== "WATCHED"}
+        inert={status !== "WATCHED"}
+        className={`mt-4 grid transition-[grid-template-rows,opacity,transform] ease-out ${
+          status === "WATCHED" ? "grid-rows-[1fr] translate-y-0 opacity-100" : "grid-rows-[0fr] translate-y-1 opacity-0"
+        }`}
+      >
+        <div className="overflow-hidden">
+          <div className="rounded-xl border border-black/10 p-3 dark:border-white/10">
+            <div className="flex items-center justify-between">
+              <label className="text-sm font-medium">My rating</label>
+              {flash === "rating" && <span className="meta flash-caption">Saved</span>}
+            </div>
+            <div className="mt-2 grid grid-cols-10 gap-1">
+              {RATINGS.map((n) => (
+                <button
+                  key={n}
+                  type="button"
+                  onClick={() => rate(n)}
+                  disabled={saving}
+                  aria-pressed={myRating === n}
+                  aria-label={`Rate ${n} out of 10`}
+                  className={`flex h-9 items-center justify-center rounded-lg font-mono text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground disabled:opacity-50 ${
+                    myRating === n
+                      ? "bg-foreground text-background"
+                      : "text-gray-500 hover:bg-gray-100 active:bg-gray-100 dark:hover:bg-white/10 dark:active:bg-white/10"
+                  }`}
+                >
+                  {n}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
 

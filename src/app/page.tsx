@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ListToggle } from "@/components/ListToggle";
 import { TitleCard, type CardTitle } from "@/components/TitleCard";
+import type { MediaKind } from "@/lib/types";
 
 type Status = "WANT" | "WATCHED";
 
@@ -15,6 +16,29 @@ function UrlStatusSync({ onStatus }: { onStatus: (s: Status) => void }) {
   useEffect(() => {
     if (raw === "WANT" || raw === "WATCHED") onStatus(raw);
   }, [raw, onStatus]);
+  return null;
+}
+
+// Same isolation reasoning as UrlStatusSync — also doubles as the fix for the
+// genre filter resetting on Back from a title detail page: since it's read
+// from the URL rather than held only in component state, it survives a Home
+// remount the same way the active tab already does.
+function UrlGenreSync({ onGenre }: { onGenre: (g: string | null) => void }) {
+  const searchParams = useSearchParams();
+  const raw = searchParams.get("genre");
+  useEffect(() => {
+    onGenre(raw);
+  }, [raw, onGenre]);
+  return null;
+}
+
+// Same mechanism as UrlGenreSync, for the independent movie/series filter.
+function UrlTypeSync({ onType }: { onType: (t: MediaKind | null) => void }) {
+  const searchParams = useSearchParams();
+  const raw = searchParams.get("type");
+  useEffect(() => {
+    onType(raw === "MOVIE" || raw === "TV" ? raw : null);
+  }, [raw, onType]);
   return null;
 }
 
@@ -38,7 +62,8 @@ const listCache: Record<Status, ListState> = { WANT: emptyListState, WATCHED: em
 export default function Home() {
   const [status, setStatus] = useState<Status>("WANT");
   const [reloadToken, setReloadToken] = useState(0);
-  const [genreFilter, setGenreFilter] = useState<string | null>(null);
+  const [genreFilter, setGenreFilterState] = useState<string | null>(null);
+  const [typeFilter, setTypeFilterState] = useState<MediaKind | null>(null);
   const [lists, setListsState] = useState<Record<Status, ListState>>(() => listCache);
   const setLists = useCallback((updater: (prev: Record<Status, ListState>) => Record<Status, ListState>) => {
     setListsState((prev) => {
@@ -50,13 +75,34 @@ export default function Home() {
   const skipNextStatusFetch = useRef(true);
   const router = useRouter();
 
-  // Keep the active tab in the URL (replace, not push) so Back from a title
-  // detail page restores the tab you were actually on instead of resetting.
+  // The active tab plus the (Want-only) genre and type filters all live in the
+  // URL, not just component state, so Back from a title detail page restores
+  // all three instead of resetting — same fix as the scroll-position issue,
+  // same mechanism.
+  function buildUrl(s: Status, genre: string | null, type: MediaKind | null): string {
+    const params = new URLSearchParams();
+    if (s !== "WANT") params.set("status", s);
+    if (s === "WANT" && genre) params.set("genre", genre);
+    if (s === "WANT" && type) params.set("type", type);
+    const qs = params.toString();
+    return qs ? `/?${qs}` : "/";
+  }
+
   function changeStatus(next: Status) {
     setStatus(next);
-    router.replace(next === "WANT" ? "/" : `/?status=${next}`, { scroll: false });
+    router.replace(buildUrl(next, genreFilter, typeFilter), { scroll: false });
+  }
+  function changeGenre(next: string | null) {
+    setGenreFilterState(next);
+    router.replace(buildUrl(status, next, typeFilter), { scroll: false });
+  }
+  function changeType(next: MediaKind | null) {
+    setTypeFilterState(next);
+    router.replace(buildUrl(status, genreFilter, next), { scroll: false });
   }
   const handleUrlStatus = useCallback((s: Status) => setStatus(s), []);
+  const handleUrlGenre = useCallback((g: string | null) => setGenreFilterState(g), []);
+  const handleUrlType = useCallback((t: MediaKind | null) => setTypeFilterState(t), []);
 
   const load = useCallback((target: Status) => {
     let ignore = false;
@@ -112,18 +158,45 @@ export default function Home() {
     WATCHED: lists.WATCHED.loaded ? lists.WATCHED.titles.length : null,
   };
 
-  // Chips are built only from genres actually present in the Want list, so a
-  // stale selection (e.g. the last title with that genre got removed) just
-  // falls back to unfiltered rather than showing an active chip with no matches.
+  // Chips are built only from genres actually present in the Want list (not
+  // recomputed against the active type filter), so a stale genre selection
+  // just falls back to unfiltered, and toggling the type filter never makes
+  // genre chips appear/disappear.
   const wantGenres = Array.from(new Set(lists.WANT.titles.flatMap((t) => t.genres))).sort();
   const activeGenre = status === "WANT" && genreFilter && wantGenres.includes(genreFilter) ? genreFilter : null;
-  const showGenreFilter = status === "WANT" && !showSkeleton && !showError && !showEmpty && wantGenres.length > 0;
-  const displayTitles = activeGenre ? current.titles.filter((t) => t.genres.includes(activeGenre)) : current.titles;
+  const activeType = status === "WANT" ? typeFilter : null;
+  const showFilterRow = status === "WANT" && !showSkeleton && !showError && !showEmpty;
+  const displayTitles = current.titles.filter(
+    (t) => (!activeGenre || t.genres.includes(activeGenre)) && (!activeType || t.mediaType === activeType),
+  );
+  const showFilteredEmpty = !showSkeleton && !showError && !showEmpty && displayTitles.length === 0;
+  const typeLabel = (t: MediaKind) => (t === "MOVIE" ? "movies" : "series");
+  const filteredEmptyMessage = activeType && activeGenre
+    ? `No ${typeLabel(activeType)} in ${activeGenre} yet`
+    : activeType
+    ? `No ${typeLabel(activeType)} yet`
+    : activeGenre
+    ? `No titles in ${activeGenre} yet`
+    : "Nothing matches this filter yet";
+
+  // Shared style for both filter dimensions — same mono chip/pill vocabulary
+  // used on the detail page's genre pills, just interactive here.
+  function chipClass(active: boolean): string {
+    return `flex-shrink-0 whitespace-nowrap rounded-full px-2.5 py-1 font-mono text-[11px] uppercase tracking-wide transition-colors active:opacity-70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground ${
+      active ? "bg-foreground text-background" : "bg-gray-100 text-gray-500 hover:text-foreground dark:bg-white/10"
+    }`;
+  }
 
   return (
     <main className="mx-auto w-full max-w-2xl p-4 pb-24">
       <Suspense fallback={null}>
         <UrlStatusSync onStatus={handleUrlStatus} />
+      </Suspense>
+      <Suspense fallback={null}>
+        <UrlGenreSync onGenre={handleUrlGenre} />
+      </Suspense>
+      <Suspense fallback={null}>
+        <UrlTypeSync onType={handleUrlType} />
       </Suspense>
       <div className="mb-4 flex items-center justify-between">
         <h1 className="text-lg font-semibold">Watchlist</h1>
@@ -138,35 +211,46 @@ export default function Home() {
       {!showSkeleton && !showError && !showEmpty && (
         <p className="mt-4 meta">{SORT_CAPTION[status]}</p>
       )}
-      {showGenreFilter && (
+      {showFilterRow && (
         <div className="-mx-4 mt-3 flex gap-1.5 overflow-x-auto scrollbar-hide px-4 pb-1 [-webkit-overflow-scrolling:touch]">
-          <button
-            type="button"
-            onClick={() => setGenreFilter(null)}
-            aria-pressed={activeGenre === null}
-            className={`flex-shrink-0 whitespace-nowrap rounded-full px-2.5 py-1 font-mono text-[11px] uppercase tracking-wide transition-colors active:opacity-70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground ${
-              activeGenre === null
-                ? "bg-foreground text-background"
-                : "bg-gray-100 text-gray-500 hover:text-foreground dark:bg-white/10"
-            }`}
-          >
+          <button type="button" onClick={() => changeType(null)} aria-pressed={activeType === null} className={chipClass(activeType === null)}>
             All
           </button>
-          {wantGenres.map((g) => (
-            <button
-              key={g}
-              type="button"
-              onClick={() => setGenreFilter(activeGenre === g ? null : g)}
-              aria-pressed={activeGenre === g}
-              className={`flex-shrink-0 whitespace-nowrap rounded-full px-2.5 py-1 font-mono text-[11px] uppercase tracking-wide transition-colors active:opacity-70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground ${
-                activeGenre === g
-                  ? "bg-foreground text-background"
-                  : "bg-gray-100 text-gray-500 hover:text-foreground dark:bg-white/10"
-              }`}
-            >
-              {g}
-            </button>
-          ))}
+          <button
+            type="button"
+            onClick={() => changeType(activeType === "MOVIE" ? null : "MOVIE")}
+            aria-pressed={activeType === "MOVIE"}
+            className={chipClass(activeType === "MOVIE")}
+          >
+            Movies
+          </button>
+          <button
+            type="button"
+            onClick={() => changeType(activeType === "TV" ? null : "TV")}
+            aria-pressed={activeType === "TV"}
+            className={chipClass(activeType === "TV")}
+          >
+            Series
+          </button>
+          {wantGenres.length > 0 && (
+            <>
+              <div className="mx-0.5 h-5 w-px flex-shrink-0 self-center bg-black/10 dark:bg-white/10" aria-hidden="true" />
+              <button type="button" onClick={() => changeGenre(null)} aria-pressed={activeGenre === null} className={chipClass(activeGenre === null)}>
+                All
+              </button>
+              {wantGenres.map((g) => (
+                <button
+                  key={g}
+                  type="button"
+                  onClick={() => changeGenre(activeGenre === g ? null : g)}
+                  aria-pressed={activeGenre === g}
+                  className={chipClass(activeGenre === g)}
+                >
+                  {g}
+                </button>
+              ))}
+            </>
+          )}
         </div>
       )}
       {showSkeleton ? (
@@ -204,6 +288,10 @@ export default function Home() {
             <p className="mt-1 text-sm text-gray-500">Titles move here when you mark them watched.</p>
           </div>
         )
+      ) : showFilteredEmpty ? (
+        <div className="mt-8 py-8 text-center">
+          <p className="text-sm text-gray-500">{filteredEmptyMessage}</p>
+        </div>
       ) : (
         <div className="mt-2 grid grid-cols-3 gap-3 sm:grid-cols-4 fade-in">
           {displayTitles.map((t) => <TitleCard key={t.id} t={t} />)}

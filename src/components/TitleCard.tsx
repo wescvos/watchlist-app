@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { MediaKind } from "@/lib/types";
 
 export interface CardTitle {
   id: string;
@@ -7,6 +8,7 @@ export interface CardTitle {
   posterUrl: string | null;
   myRating: number | null;
   genres: string[];
+  mediaType: MediaKind;
 }
 
 export function TitleCard({ t }: { t: CardTitle }) {
