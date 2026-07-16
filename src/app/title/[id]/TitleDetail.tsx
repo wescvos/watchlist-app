@@ -150,7 +150,7 @@ export function TitleDetail({ title }: { title: Title }) {
 
   return (
     <main className="mx-auto w-full max-w-2xl p-4 pb-24 fade-in">
-      <BackLink href="/" label="Back to watchlist" />
+      <BackLink onClick={() => router.back()} label="Back to watchlist" />
 
       <TitleHeader
         title={title.title}

@@ -29,13 +29,24 @@ const emptyListState: ListState = { titles: [], loaded: false, fetching: false, 
 const STATUSES: Status[] = ["WANT", "WATCHED"];
 const SORT_CAPTION: Record<Status, string> = { WANT: "By date added", WATCHED: "By date watched" };
 
+// Module-level so it survives a Home remount (e.g. Back from a title detail
+// page), not just tab switches within one mount — otherwise the return trip
+// shows an empty skeleton for a beat, which visually breaks scroll restoration
+// even though the browser technically restored the scroll offset underneath.
+const listCache: Record<Status, ListState> = { WANT: emptyListState, WATCHED: emptyListState };
+
 export default function Home() {
   const [status, setStatus] = useState<Status>("WANT");
   const [reloadToken, setReloadToken] = useState(0);
-  const [lists, setLists] = useState<Record<Status, ListState>>({
-    WANT: emptyListState,
-    WATCHED: emptyListState,
-  });
+  const [genreFilter, setGenreFilter] = useState<string | null>(null);
+  const [lists, setListsState] = useState<Record<Status, ListState>>(() => listCache);
+  const setLists = useCallback((updater: (prev: Record<Status, ListState>) => Record<Status, ListState>) => {
+    setListsState((prev) => {
+      const next = updater(prev);
+      Object.assign(listCache, next);
+      return next;
+    });
+  }, []);
   const skipNextStatusFetch = useRef(true);
   const router = useRouter();
 
@@ -47,7 +58,7 @@ export default function Home() {
   }
   const handleUrlStatus = useCallback((s: Status) => setStatus(s), []);
 
-  function load(target: Status) {
+  const load = useCallback((target: Status) => {
     let ignore = false;
     setLists((prev) => ({ ...prev, [target]: { ...prev[target], fetching: true } }));
     fetch(`/api/titles?status=${target}`)
@@ -66,13 +77,13 @@ export default function Home() {
     return () => {
       ignore = true;
     };
-  }
+  }, [setLists]);
 
   // Load both lists once so tab counts and the inactive tab's grid are ready before it's opened.
   useEffect(() => {
     const cancels = STATUSES.map((s) => load(s));
     return () => cancels.forEach((cancel) => cancel());
-  }, []);
+  }, [load]);
 
   // Revalidate the active list in the background whenever it's switched to (skip the mount fetch above).
   useEffect(() => {
@@ -81,7 +92,7 @@ export default function Home() {
       return;
     }
     return load(status);
-  }, [status, reloadToken]);
+  }, [status, reloadToken, load]);
 
   // Keep the list current when the installed app is resumed from the background.
   useEffect(() => {
@@ -101,6 +112,14 @@ export default function Home() {
     WATCHED: lists.WATCHED.loaded ? lists.WATCHED.titles.length : null,
   };
 
+  // Chips are built only from genres actually present in the Want list, so a
+  // stale selection (e.g. the last title with that genre got removed) just
+  // falls back to unfiltered rather than showing an active chip with no matches.
+  const wantGenres = Array.from(new Set(lists.WANT.titles.flatMap((t) => t.genres))).sort();
+  const activeGenre = status === "WANT" && genreFilter && wantGenres.includes(genreFilter) ? genreFilter : null;
+  const showGenreFilter = status === "WANT" && !showSkeleton && !showError && !showEmpty && wantGenres.length > 0;
+  const displayTitles = activeGenre ? current.titles.filter((t) => t.genres.includes(activeGenre)) : current.titles;
+
   return (
     <main className="mx-auto w-full max-w-2xl p-4 pb-24">
       <Suspense fallback={null}>
@@ -118,6 +137,37 @@ export default function Home() {
       <ListToggle value={status} onChange={changeStatus} counts={counts} />
       {!showSkeleton && !showError && !showEmpty && (
         <p className="mt-4 meta">{SORT_CAPTION[status]}</p>
+      )}
+      {showGenreFilter && (
+        <div className="-mx-4 mt-3 flex gap-1.5 overflow-x-auto scrollbar-hide px-4 pb-1 [-webkit-overflow-scrolling:touch]">
+          <button
+            type="button"
+            onClick={() => setGenreFilter(null)}
+            aria-pressed={activeGenre === null}
+            className={`flex-shrink-0 whitespace-nowrap rounded-full px-2.5 py-1 font-mono text-[11px] uppercase tracking-wide transition-colors active:opacity-70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground ${
+              activeGenre === null
+                ? "bg-foreground text-background"
+                : "bg-gray-100 text-gray-500 hover:text-foreground dark:bg-white/10"
+            }`}
+          >
+            All
+          </button>
+          {wantGenres.map((g) => (
+            <button
+              key={g}
+              type="button"
+              onClick={() => setGenreFilter(activeGenre === g ? null : g)}
+              aria-pressed={activeGenre === g}
+              className={`flex-shrink-0 whitespace-nowrap rounded-full px-2.5 py-1 font-mono text-[11px] uppercase tracking-wide transition-colors active:opacity-70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground ${
+                activeGenre === g
+                  ? "bg-foreground text-background"
+                  : "bg-gray-100 text-gray-500 hover:text-foreground dark:bg-white/10"
+              }`}
+            >
+              {g}
+            </button>
+          ))}
+        </div>
       )}
       {showSkeleton ? (
         <div className="mt-4 grid grid-cols-3 gap-3 sm:grid-cols-4" aria-hidden="true">
@@ -156,7 +206,7 @@ export default function Home() {
         )
       ) : (
         <div className="mt-2 grid grid-cols-3 gap-3 sm:grid-cols-4 fade-in">
-          {current.titles.map((t) => <TitleCard key={t.id} t={t} />)}
+          {displayTitles.map((t) => <TitleCard key={t.id} t={t} />)}
         </div>
       )}
       <Link

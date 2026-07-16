@@ -6,6 +6,7 @@ export interface CardTitle {
   year: number | null;
   posterUrl: string | null;
   myRating: number | null;
+  genres: string[];
 }
 
 export function TitleCard({ t }: { t: CardTitle }) {
