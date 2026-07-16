@@ -46,3 +46,6 @@ next-env.d.ts
 
 # Per-developer Claude Code local settings
 .claude/settings.local.json
+
+# personal data for the one-off Google Takeout import (scripts/import-google-takeout.ts)
+/import/

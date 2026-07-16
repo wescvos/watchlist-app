@@ -13,14 +13,14 @@ function mockFetchOnce(json: unknown) {
 describe("searchTitles", () => {
   it("maps multi-search movie + tv, skips person", async () => {
     mockFetchOnce({ results: [
-      { media_type: "movie", id: 1, title: "Dune", release_date: "2021-10-22", poster_path: "/a.jpg" },
+      { media_type: "movie", id: 1, title: "Dune", release_date: "2021-10-22", poster_path: "/a.jpg", popularity: 123.4, vote_count: 9000 },
       { media_type: "tv", id: 2, name: "Severance", first_air_date: "2022-02-18", poster_path: null },
       { media_type: "person", id: 3, name: "Someone" },
     ]});
     const out = await searchTitles("x");
     expect(out).toEqual([
-      { tmdbId: 1, mediaType: "MOVIE", title: "Dune", year: 2021, posterUrl: "https://image.tmdb.org/t/p/w500/a.jpg" },
-      { tmdbId: 2, mediaType: "TV", title: "Severance", year: 2022, posterUrl: null },
+      { tmdbId: 1, mediaType: "MOVIE", title: "Dune", year: 2021, posterUrl: "https://image.tmdb.org/t/p/w500/a.jpg", popularity: 123.4, voteCount: 9000 },
+      { tmdbId: 2, mediaType: "TV", title: "Severance", year: 2022, posterUrl: null, popularity: 0, voteCount: 0 },
     ]);
   });
 

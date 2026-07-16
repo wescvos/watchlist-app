@@ -65,6 +65,8 @@ export async function searchTitles(q: string): Promise<SearchResult[]> {
         title: r.title ?? r.name,
         year: yearOf(r.release_date ?? r.first_air_date),
         posterUrl: poster(r.poster_path ?? null),
+        popularity: typeof r.popularity === "number" ? r.popularity : 0,
+        voteCount: typeof r.vote_count === "number" ? r.vote_count : 0,
       };
     });
 }

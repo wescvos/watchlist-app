@@ -6,6 +6,8 @@ export interface SearchResult {
   title: string;
   year: number | null;
   posterUrl: string | null;
+  popularity: number;
+  voteCount: number;
 }
 
 export interface LibraryMatch {
