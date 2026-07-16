@@ -8,6 +8,9 @@ vi.mock("@/lib/titles", () => ({
   listTitles: vi.fn(),
   refreshTitle: vi.fn(),
 }));
+vi.mock("@/lib/prisma", () => ({
+  prisma: { title: { findMany: vi.fn().mockResolvedValue([]) } },
+}));
 
 import { searchTitles } from "@/lib/tmdb";
 import { GET } from "@/app/api/search/route";
@@ -26,6 +29,7 @@ describe("GET /api/search", () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body[0].title).toBe("Dune");
+    expect(body[0].library).toBeNull();
   });
 });
 

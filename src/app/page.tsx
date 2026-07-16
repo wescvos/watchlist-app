@@ -81,7 +81,7 @@ export default function Home() {
   };
 
   return (
-    <main className="mx-auto max-w-2xl p-4 pb-24">
+    <main className="mx-auto w-full max-w-2xl p-4 pb-24">
       <div className="mb-4 flex items-center justify-between">
         <h1 className="text-lg font-semibold">Watchlist</h1>
         <Link

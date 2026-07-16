@@ -24,6 +24,8 @@
 
 html {
   -webkit-tap-highlight-color: transparent;
+  overflow-x: hidden;
+  overscroll-behavior-x: none;
 }
 
 body {
@@ -32,6 +34,8 @@ body {
   font-family: var(--font-sans), Arial, Helvetica, sans-serif;
   padding-top: env(safe-area-inset-top);
   padding-bottom: env(safe-area-inset-bottom);
+  overflow-x: hidden;
+  overscroll-behavior-x: none;
 }
 
 @layer utilities {

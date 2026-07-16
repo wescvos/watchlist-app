@@ -3,9 +3,13 @@ import type { SearchResult, TmdbDetails, MediaKind, CastMember } from "@/lib/typ
 
 const BASE = "https://api.themoviedb.org/3";
 const IMG = "https://image.tmdb.org/t/p/w500";
+const PROFILE_IMG = "https://image.tmdb.org/t/p/w185";
 
 function poster(path: string | null): string | null {
   return path ? `${IMG}${path}` : null;
+}
+function profile(path: string | null | undefined): string | null {
+  return path ? `${PROFILE_IMG}${path}` : null;
 }
 function yearOf(date?: string | null): number | null {
   if (!date) return null;
@@ -44,7 +48,7 @@ export async function getTitleDetails(tmdbId: number, mediaType: MediaKind): Pro
 
   const cast: CastMember[] = (data.credits?.cast ?? [])
     .slice(0, 15)
-    .map((c: any) => ({ name: c.name, character: c.character ?? "" }));
+    .map((c: any) => ({ name: c.name, character: c.character ?? "", profileUrl: profile(c.profile_path) }));
 
   const director =
     (data.credits?.crew ?? []).find((c: any) => c.job === "Director")?.name ?? null;

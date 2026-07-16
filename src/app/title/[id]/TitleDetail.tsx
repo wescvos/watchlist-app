@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { BackLink } from "@/components/BackLink";
 
-interface CastMember { name: string; character: string; }
+interface CastMember { name: string; character: string; profileUrl: string | null; }
 interface Title {
   id: string; title: string; year: number | null; posterUrl: string | null;
   overview: string | null; runtime: number | null; genres: string[];
@@ -49,7 +49,6 @@ export function TitleDetail({ title }: { title: Title }) {
   const [error, setError] = useState("");
   const [flash, setFlash] = useState<"rating" | "note" | "refresh" | null>(null);
   const [confirmingRemove, setConfirmingRemove] = useState(false);
-  const [showAllCast, setShowAllCast] = useState(false);
   const flashTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const confirmTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -154,10 +153,9 @@ export function TitleDetail({ title }: { title: Title }) {
   }
 
   const noteDirty = note !== (title.note ?? "");
-  const visibleCast = showAllCast ? title.cast : title.cast.slice(0, 6);
 
   return (
-    <main className="mx-auto max-w-2xl p-4 pb-24 fade-in">
+    <main className="mx-auto w-full max-w-2xl p-4 pb-24 fade-in">
       <BackLink href="/" label="Back to watchlist" />
 
       <div className="mt-3 flex gap-4">
@@ -224,23 +222,30 @@ export function TitleDetail({ title }: { title: Title }) {
 
       {title.overview && <p className="mt-4 text-sm leading-relaxed">{title.overview}</p>}
 
-      {/* Cast as individual items */}
+      {/* Cast */}
       {title.cast.length > 0 && (
         <div className="mt-4">
           <h2 className="text-sm font-medium">Cast</h2>
-          <ul className="mt-1 space-y-0.5 text-sm text-gray-700 dark:text-gray-300">
-            {visibleCast.map((c, i) => (
-              <li key={i}>{c.name}{c.character ? <span className="text-gray-400"> as {c.character}</span> : null}</li>
+          <div className="-mx-4 mt-2 flex snap-x snap-mandatory gap-4 overflow-x-auto touch-pan-x overscroll-x-contain px-4 pb-1 [-webkit-overflow-scrolling:touch]">
+            {title.cast.map((c, i) => (
+              <div key={i} className="flex w-16 flex-shrink-0 snap-start flex-col items-center">
+                <div className="aspect-[2/3] w-16 flex-shrink-0 overflow-hidden rounded-lg bg-gray-200 ring-1 ring-black/5 dark:bg-white/10 dark:ring-white/10">
+                  {c.profileUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img src={c.profileUrl} alt={c.name} className="h-full w-full object-cover" />
+                  ) : (
+                    <div className="flex h-full items-center justify-center p-1 text-center meta">
+                      {c.name}
+                    </div>
+                  )}
+                </div>
+                <p className="mt-1.5 w-full truncate text-center meta">{c.name}</p>
+                {c.character && (
+                  <p className="w-full truncate text-center text-[11px] text-gray-400 dark:text-gray-500">{c.character}</p>
+                )}
+              </div>
             ))}
-          </ul>
-          {title.cast.length > 6 && (
-            <button
-              onClick={() => setShowAllCast((v) => !v)}
-              className="mt-1.5 meta hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground"
-            >
-              {showAllCast ? "Show less" : `All ${title.cast.length}`}
-            </button>
-          )}
+          </div>
         </div>
       )}
 

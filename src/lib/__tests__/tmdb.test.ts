@@ -38,7 +38,7 @@ describe("getTitleDetails", () => {
       genres: [{ name: "Sci-Fi" }, { name: "Adventure" }],
       external_ids: { imdb_id: "tt1160419" },
       credits: {
-        cast: [{ name: "Timothée", character: "Paul" }, { name: "Zendaya", character: "Chani" }],
+        cast: [{ name: "Timothée", character: "Paul", profile_path: "/tc.jpg" }, { name: "Zendaya", character: "Chani" }],
         crew: [{ job: "Director", name: "Denis Villeneuve" }],
       },
     });
@@ -46,7 +46,8 @@ describe("getTitleDetails", () => {
     expect(out.imdbId).toBe("tt1160419");
     expect(out.director).toBe("Denis Villeneuve");
     expect(out.genres).toEqual(["Sci-Fi", "Adventure"]);
-    expect(out.cast[0]).toEqual({ name: "Timothée", character: "Paul" });
+    expect(out.cast[0]).toEqual({ name: "Timothée", character: "Paul", profileUrl: "https://image.tmdb.org/t/p/w185/tc.jpg" });
+    expect(out.cast[1]).toEqual({ name: "Zendaya", character: "Chani", profileUrl: null });
     expect(out.tmdbScore).toBe(8.0);
     expect(out.runtime).toBe(155);
   });
@@ -68,7 +69,7 @@ describe("getTitleDetails", () => {
     expect(out.runtime).toBe(50);
     expect(out.imdbId).toBe("tt11280740");
     expect(out.genres).toEqual(["Drama", "Sci-Fi"]);
-    expect(out.cast[0]).toEqual({ name: "Adam Scott", character: "Mark" });
+    expect(out.cast[0]).toEqual({ name: "Adam Scott", character: "Mark", profileUrl: null });
     expect(out.tmdbScore).toBe(8.4);
   });
 });

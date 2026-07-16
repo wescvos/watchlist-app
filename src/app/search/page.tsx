@@ -92,7 +92,7 @@ export default function SearchPage() {
   }
 
   return (
-    <main className="mx-auto max-w-2xl p-4 pb-24">
+    <main className="mx-auto w-full max-w-2xl p-4 pb-24">
       <Suspense fallback={null}>
         <UrlQuerySync onQuery={handleUrlQuery} />
       </Suspense>

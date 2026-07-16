@@ -20,6 +20,7 @@ export interface SearchResultWithLibrary extends SearchResult {
 export interface CastMember {
   name: string;
   character: string;
+  profileUrl: string | null;
 }
 
 export interface TmdbDetails {
