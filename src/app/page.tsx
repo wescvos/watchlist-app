@@ -1,10 +1,22 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { ListToggle } from "@/components/ListToggle";
 import { TitleCard, type CardTitle } from "@/components/TitleCard";
 
 type Status = "WANT" | "WATCHED";
+
+// Isolated so only this reads the URL — keeps the rest of the page server-rendered
+// instead of the whole tree bailing to client-only rendering for useSearchParams.
+function UrlStatusSync({ onStatus }: { onStatus: (s: Status) => void }) {
+  const searchParams = useSearchParams();
+  const raw = searchParams.get("status");
+  useEffect(() => {
+    if (raw === "WANT" || raw === "WATCHED") onStatus(raw);
+  }, [raw, onStatus]);
+  return null;
+}
 
 interface ListState {
   titles: CardTitle[];
@@ -25,6 +37,15 @@ export default function Home() {
     WATCHED: emptyListState,
   });
   const skipNextStatusFetch = useRef(true);
+  const router = useRouter();
+
+  // Keep the active tab in the URL (replace, not push) so Back from a title
+  // detail page restores the tab you were actually on instead of resetting.
+  function changeStatus(next: Status) {
+    setStatus(next);
+    router.replace(next === "WANT" ? "/" : `/?status=${next}`, { scroll: false });
+  }
+  const handleUrlStatus = useCallback((s: Status) => setStatus(s), []);
 
   function load(target: Status) {
     let ignore = false;
@@ -82,6 +103,9 @@ export default function Home() {
 
   return (
     <main className="mx-auto w-full max-w-2xl p-4 pb-24">
+      <Suspense fallback={null}>
+        <UrlStatusSync onStatus={handleUrlStatus} />
+      </Suspense>
       <div className="mb-4 flex items-center justify-between">
         <h1 className="text-lg font-semibold">Watchlist</h1>
         <Link
@@ -91,7 +115,7 @@ export default function Home() {
           + Add
         </Link>
       </div>
-      <ListToggle value={status} onChange={setStatus} counts={counts} />
+      <ListToggle value={status} onChange={changeStatus} counts={counts} />
       {!showSkeleton && !showError && !showEmpty && (
         <p className="mt-4 meta">{SORT_CAPTION[status]}</p>
       )}

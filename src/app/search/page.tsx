@@ -27,6 +27,13 @@ export default function SearchPage() {
   const [searchError, setSearchError] = useState("");
   const router = useRouter();
   const searchedForRef = useRef("");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Belt-and-suspenders alongside the native autoFocus attribute below: some
+  // mobile browsers only reliably open the keyboard from an imperative focus().
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
 
   const performSearch = useCallback(async (term: string) => {
     setBusy(true);
@@ -57,6 +64,7 @@ export default function SearchPage() {
     e.preventDefault();
     const term = q.trim();
     if (!term) return;
+    inputRef.current?.blur();
     await performSearch(term);
     router.replace(`/search?q=${encodeURIComponent(term)}`, { scroll: false });
   }
@@ -78,6 +86,7 @@ export default function SearchPage() {
             <path d="M21 21l-3.5-3.5" />
           </svg>
           <input
+            ref={inputRef}
             value={q}
             onChange={(e) => setQ(e.target.value)}
             placeholder="Search movies and series"
