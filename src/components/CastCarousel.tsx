@@ -18,7 +18,14 @@ export function CastCarousel({ cast }: { cast: CastMember[] }) {
                 </div>
               )}
             </div>
-            <p className="mt-1.5 w-full break-words text-center meta">{c.name}</p>
+            <a
+              href={`https://www.google.com/search?q=${encodeURIComponent(c.name)}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-1.5 w-full break-words text-center meta underline decoration-dotted underline-offset-2 transition-opacity hover:text-foreground active:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground"
+            >
+              {c.name}
+            </a>
             {c.character && (
               <p className="w-full truncate text-center text-[11px] text-gray-400 dark:text-gray-500">{c.character}</p>
             )}
