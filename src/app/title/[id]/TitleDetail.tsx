@@ -5,12 +5,15 @@ import { BackLink } from "@/components/BackLink";
 import { TitleHeader } from "@/components/TitleHeader";
 import { ExternalRatings } from "@/components/ExternalRatings";
 import { CastCarousel } from "@/components/CastCarousel";
-import type { CastMember } from "@/lib/types";
+import { WatchProviders } from "@/components/WatchProviders";
+import type { CastMember, WatchProvider } from "@/lib/types";
 
 interface Title {
   id: string; title: string; year: number | null; posterUrl: string | null;
+  mediaType: "MOVIE" | "TV"; numberOfSeasons: number | null; numberOfEpisodes: number | null;
   overview: string | null; runtime: number | null; genres: string[];
   cast: CastMember[]; director: string | null;
+  watchProviders: WatchProvider[]; watchLink: string | null;
   tmdbScore: number | null; imdbScore: string | null; rtScore: string | null; metacriticScore: string | null;
   status: "WANT" | "WATCHED"; note: string | null; myRating: number | null;
   fetchedAt: string; watchedAt: string | null;
@@ -157,6 +160,9 @@ export function TitleDetail({ title }: { title: Title }) {
         year={title.year}
         posterUrl={title.posterUrl}
         runtime={title.runtime}
+        mediaType={title.mediaType}
+        numberOfSeasons={title.numberOfSeasons}
+        numberOfEpisodes={title.numberOfEpisodes}
         director={title.director}
         genres={title.genres}
         watchedDate={status === "WATCHED" && title.watchedAt ? formatWatchedDate(title.watchedAt) : null}
@@ -222,6 +228,8 @@ export function TitleDetail({ title }: { title: Title }) {
         rtScore={title.rtScore}
         metacriticScore={title.metacriticScore}
       />
+
+      <WatchProviders providers={title.watchProviders} watchLink={title.watchLink} />
 
       {title.overview && <p className="mt-4 text-sm leading-relaxed">{title.overview}</p>}
 

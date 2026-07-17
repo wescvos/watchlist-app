@@ -59,6 +59,16 @@ describe("getTitleDetails", () => {
         cast: [{ name: "Timothée", character: "Paul", profile_path: "/tc.jpg" }, { name: "Zendaya", character: "Chani" }],
         crew: [{ job: "Director", name: "Denis Villeneuve" }],
       },
+      "watch/providers": {
+        results: {
+          ZA: {
+            link: "https://www.themoviedb.org/movie/1-dune/watch?locale=ZA",
+            flatrate: [{ provider_name: "Netflix", logo_path: "/nf.jpg" }],
+            rent: [{ provider_name: "Apple TV", logo_path: "/atv.jpg" }],
+            buy: [{ provider_name: "Apple TV", logo_path: "/atv.jpg" }],
+          },
+        },
+      },
     });
     const out = await getTitleDetails(1, "MOVIE");
     expect(out.imdbId).toBe("tt1160419");
@@ -68,12 +78,29 @@ describe("getTitleDetails", () => {
     expect(out.cast[1]).toEqual({ name: "Zendaya", character: "Chani", profileUrl: null });
     expect(out.tmdbScore).toBe(8.0);
     expect(out.runtime).toBe(155);
+    expect(out.numberOfSeasons).toBeNull();
+    expect(out.numberOfEpisodes).toBeNull();
+    // flatrate only — rent/buy must not leak in, this is a watchlist not a shopping guide
+    expect(out.watchProviders).toEqual([{ name: "Netflix", logoUrl: "https://image.tmdb.org/t/p/w92/nf.jpg" }]);
+    expect(out.watchLink).toBe("https://www.themoviedb.org/movie/1-dune/watch?locale=ZA");
+  });
+
+  it("returns empty watch providers and null link when the ZA region has no data", async () => {
+    mockFetchOnce({
+      id: 4, title: "No Region Data", release_date: "2019-01-01",
+      genres: [], credits: { cast: [], crew: [] },
+      "watch/providers": { results: { US: { flatrate: [{ provider_name: "Netflix", logo_path: "/nf.jpg" }] } } },
+    });
+    const out = await getTitleDetails(4, "MOVIE");
+    expect(out.watchProviders).toEqual([]);
+    expect(out.watchLink).toBeNull();
   });
 
   it("merges details for a TV series (name, first_air_date, episode_run_time)", async () => {
     mockFetchOnce({
       id: 2, name: "Severance", first_air_date: "2022-02-18", poster_path: "/b.jpg",
       overview: "Work.", episode_run_time: [50], vote_average: 8.4,
+      number_of_seasons: 2, number_of_episodes: 19,
       genres: [{ name: "Drama" }, { name: "Sci-Fi" }],
       external_ids: { imdb_id: "tt11280740" },
       credits: {
@@ -89,5 +116,17 @@ describe("getTitleDetails", () => {
     expect(out.genres).toEqual(["Drama", "Sci-Fi"]);
     expect(out.cast[0]).toEqual({ name: "Adam Scott", character: "Mark", profileUrl: null });
     expect(out.tmdbScore).toBe(8.4);
+    expect(out.numberOfSeasons).toBe(2);
+    expect(out.numberOfEpisodes).toBe(19);
+  });
+
+  it("leaves numberOfSeasons/numberOfEpisodes null when TMDb omits them for a TV series", async () => {
+    mockFetchOnce({
+      id: 3, name: "No Data Show", first_air_date: "2020-01-01",
+      genres: [], credits: { cast: [], crew: [] },
+    });
+    const out = await getTitleDetails(3, "TV");
+    expect(out.numberOfSeasons).toBeNull();
+    expect(out.numberOfEpisodes).toBeNull();
   });
 });

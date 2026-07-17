@@ -1,15 +1,23 @@
 import { env } from "@/lib/env";
-import type { SearchResult, TmdbDetails, MediaKind, CastMember } from "@/lib/types";
+import type { SearchResult, TmdbDetails, MediaKind, CastMember, WatchProvider } from "@/lib/types";
 
 const BASE = "https://api.themoviedb.org/3";
 const IMG = "https://image.tmdb.org/t/p/w500";
 const PROFILE_IMG = "https://image.tmdb.org/t/p/w185";
+const PROVIDER_LOGO_IMG = "https://image.tmdb.org/t/p/w92";
+
+// Streaming availability is region-specific; JustWatch (TMDb's source) only
+// covers one region per lookup, so this is hardcoded rather than configurable.
+const WATCH_REGION = "ZA";
 
 function poster(path: string | null): string | null {
   return path ? `${IMG}${path}` : null;
 }
 function profile(path: string | null | undefined): string | null {
   return path ? `${PROFILE_IMG}${path}` : null;
+}
+function providerLogo(path: string | null | undefined): string | null {
+  return path ? `${PROVIDER_LOGO_IMG}${path}` : null;
 }
 function yearOf(date?: string | null): number | null {
   if (!date) return null;
@@ -73,7 +81,7 @@ export async function searchTitles(q: string): Promise<SearchResult[]> {
 
 export async function getTitleDetails(tmdbId: number, mediaType: MediaKind): Promise<TmdbDetails> {
   const path = mediaType === "MOVIE" ? `/movie/${tmdbId}` : `/tv/${tmdbId}`;
-  const data = await tmdbGet(path, { append_to_response: "credits,external_ids" });
+  const data = await tmdbGet(path, { append_to_response: "credits,external_ids,watch/providers" });
 
   const cast: CastMember[] = (data.credits?.cast ?? [])
     .slice(0, 15)
@@ -89,6 +97,20 @@ export async function getTitleDetails(tmdbId: number, mediaType: MediaKind): Pro
           ? data.episode_run_time[0]
           : null);
 
+  const numberOfSeasons =
+    mediaType === "TV" && typeof data.number_of_seasons === "number" ? data.number_of_seasons : null;
+  const numberOfEpisodes =
+    mediaType === "TV" && typeof data.number_of_episodes === "number" ? data.number_of_episodes : null;
+
+  // JustWatch-sourced, via TMDb; flatrate only — this is a watchlist, not a
+  // rent/buy shopping guide.
+  const regionProviders = data["watch/providers"]?.results?.[WATCH_REGION];
+  const watchProviders: WatchProvider[] = (regionProviders?.flatrate ?? []).map((p: any) => ({
+    name: p.provider_name,
+    logoUrl: providerLogo(p.logo_path),
+  }));
+  const watchLink: string | null = regionProviders?.link ?? null;
+
   return {
     tmdbId: data.id,
     mediaType,
@@ -102,5 +124,9 @@ export async function getTitleDetails(tmdbId: number, mediaType: MediaKind): Pro
     cast,
     director,
     tmdbScore: typeof data.vote_average === "number" ? data.vote_average : null,
+    numberOfSeasons,
+    numberOfEpisodes,
+    watchProviders,
+    watchLink,
   };
 }

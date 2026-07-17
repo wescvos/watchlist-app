@@ -25,6 +25,11 @@ export interface CastMember {
   profileUrl: string | null;
 }
 
+export interface WatchProvider {
+  name: string;
+  logoUrl: string | null;
+}
+
 export interface TmdbDetails {
   tmdbId: number;
   mediaType: MediaKind;
@@ -38,4 +43,8 @@ export interface TmdbDetails {
   cast: CastMember[];
   director: string | null;
   tmdbScore: number | null;
+  numberOfSeasons: number | null;
+  numberOfEpisodes: number | null;
+  watchProviders: WatchProvider[];
+  watchLink: string | null;
 }

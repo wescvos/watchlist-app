@@ -5,6 +5,7 @@ import { BackLink } from "@/components/BackLink";
 import { TitleHeader } from "@/components/TitleHeader";
 import { ExternalRatings } from "@/components/ExternalRatings";
 import { CastCarousel } from "@/components/CastCarousel";
+import { WatchProviders } from "@/components/WatchProviders";
 import type { MergedTitle } from "@/lib/fetchTitle";
 
 export function TitlePreview({ title }: { title: MergedTitle }) {
@@ -42,6 +43,9 @@ export function TitlePreview({ title }: { title: MergedTitle }) {
         year={title.year}
         posterUrl={title.posterUrl}
         runtime={title.runtime}
+        mediaType={title.mediaType}
+        numberOfSeasons={title.numberOfSeasons}
+        numberOfEpisodes={title.numberOfEpisodes}
         director={title.director}
         genres={title.genres}
       />
@@ -52,6 +56,8 @@ export function TitlePreview({ title }: { title: MergedTitle }) {
         rtScore={title.rtScore}
         metacriticScore={title.metacriticScore}
       />
+
+      <WatchProviders providers={title.watchProviders} watchLink={title.watchLink} />
 
       {title.overview && <p className="mt-4 text-sm leading-relaxed">{title.overview}</p>}
 
