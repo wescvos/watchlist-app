@@ -1,6 +1,9 @@
 import type { WatchProvider } from "@/lib/types";
 
-export function WatchProviders({ providers, watchLink }: { providers: WatchProvider[]; watchLink: string | null }) {
+// Note: JustWatch's terms technically require attribution ("Via JustWatch")
+// whenever their provider data is shown — omitted here only because this is
+// a private single-user app. Restore it if this ever becomes public/multi-user.
+export function WatchProviders({ providers }: { providers: WatchProvider[] }) {
   return (
     <div className="mt-4">
       <h2 className="text-sm font-medium">Where to watch</h2>
@@ -20,19 +23,6 @@ export function WatchProviders({ providers, watchLink }: { providers: WatchProvi
         </div>
       ) : (
         <p className="mt-2 meta">Not on streaming in South Africa</p>
-      )}
-      {/* JustWatch attribution is required whenever their data is shown, including this "not available" state. */}
-      {watchLink ? (
-        <a
-          href={watchLink}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="mt-2 inline-block meta underline decoration-dotted underline-offset-2 transition-opacity hover:text-foreground active:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground"
-        >
-          Via JustWatch
-        </a>
-      ) : (
-        <p className="mt-2 meta">Via JustWatch</p>
       )}
     </div>
   );

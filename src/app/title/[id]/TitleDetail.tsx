@@ -231,7 +231,7 @@ export function TitleDetail({ title }: { title: Title }) {
         metacriticScore={title.metacriticScore}
       />
 
-      <WatchProviders providers={title.watchProviders} watchLink={title.watchLink} />
+      <WatchProviders providers={title.watchProviders} />
 
       {title.overview && <p className="mt-4 text-sm leading-relaxed">{title.overview}</p>}
 
