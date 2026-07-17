@@ -24,7 +24,9 @@ model Title {
   title            String
   year             Int?
   posterUrl        String?
+  backdropUrl      String?
   overview         String?
+  tagline          String?
   runtime          Int?
   numberOfSeasons  Int?
   numberOfEpisodes Int?

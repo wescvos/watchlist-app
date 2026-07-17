@@ -37,7 +37,9 @@ export interface TmdbDetails {
   title: string;
   year: number | null;
   posterUrl: string | null;
+  backdropUrl: string | null;
   overview: string | null;
+  tagline: string | null;
   runtime: number | null;
   genres: string[];
   cast: CastMember[];

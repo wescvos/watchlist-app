@@ -5,6 +5,7 @@ const BASE = "https://api.themoviedb.org/3";
 const IMG = "https://image.tmdb.org/t/p/w500";
 const PROFILE_IMG = "https://image.tmdb.org/t/p/w185";
 const PROVIDER_LOGO_IMG = "https://image.tmdb.org/t/p/w92";
+const BACKDROP_IMG = "https://image.tmdb.org/t/p/w1280";
 
 // Streaming availability is region-specific; JustWatch (TMDb's source) only
 // covers one region per lookup, so this is hardcoded rather than configurable.
@@ -18,6 +19,9 @@ function profile(path: string | null | undefined): string | null {
 }
 function providerLogo(path: string | null | undefined): string | null {
   return path ? `${PROVIDER_LOGO_IMG}${path}` : null;
+}
+function backdrop(path: string | null | undefined): string | null {
+  return path ? `${BACKDROP_IMG}${path}` : null;
 }
 function yearOf(date?: string | null): number | null {
   if (!date) return null;
@@ -118,7 +122,10 @@ export async function getTitleDetails(tmdbId: number, mediaType: MediaKind): Pro
     title: data.title ?? data.name,
     year: yearOf(data.release_date ?? data.first_air_date),
     posterUrl: poster(data.poster_path ?? null),
+    backdropUrl: backdrop(data.backdrop_path ?? null),
     overview: data.overview ?? null,
+    // TMDb returns "" rather than omitting the field when there's no tagline.
+    tagline: data.tagline || null,
     runtime,
     genres: (data.genres ?? []).map((g: any) => g.name),
     cast,

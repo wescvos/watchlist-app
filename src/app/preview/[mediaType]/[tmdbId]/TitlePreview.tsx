@@ -42,6 +42,8 @@ export function TitlePreview({ title }: { title: MergedTitle }) {
         title={title.title}
         year={title.year}
         posterUrl={title.posterUrl}
+        backdropUrl={title.backdropUrl}
+        tagline={title.tagline}
         runtime={title.runtime}
         mediaType={title.mediaType}
         numberOfSeasons={title.numberOfSeasons}

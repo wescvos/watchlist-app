@@ -9,9 +9,9 @@ import { WatchProviders } from "@/components/WatchProviders";
 import type { CastMember, WatchProvider } from "@/lib/types";
 
 interface Title {
-  id: string; title: string; year: number | null; posterUrl: string | null;
+  id: string; title: string; year: number | null; posterUrl: string | null; backdropUrl: string | null;
   mediaType: "MOVIE" | "TV"; numberOfSeasons: number | null; numberOfEpisodes: number | null;
-  overview: string | null; runtime: number | null; genres: string[];
+  overview: string | null; tagline: string | null; runtime: number | null; genres: string[];
   cast: CastMember[]; director: string | null;
   watchProviders: WatchProvider[]; watchLink: string | null;
   tmdbScore: number | null; imdbScore: string | null; rtScore: string | null; metacriticScore: string | null;
@@ -159,6 +159,8 @@ export function TitleDetail({ title }: { title: Title }) {
         title={title.title}
         year={title.year}
         posterUrl={title.posterUrl}
+        backdropUrl={title.backdropUrl}
+        tagline={title.tagline}
         runtime={title.runtime}
         mediaType={title.mediaType}
         numberOfSeasons={title.numberOfSeasons}

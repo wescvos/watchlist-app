@@ -51,8 +51,8 @@ describe("searchTitles", () => {
 describe("getTitleDetails", () => {
   it("merges details, credits, and external ids for a movie", async () => {
     mockFetchOnce({
-      id: 1, title: "Dune", release_date: "2021-10-22", poster_path: "/a.jpg",
-      overview: "Sand.", runtime: 155, vote_average: 8.0,
+      id: 1, title: "Dune", release_date: "2021-10-22", poster_path: "/a.jpg", backdrop_path: "/bd.jpg",
+      overview: "Sand.", tagline: "Beyond fear, destiny awaits.", runtime: 155, vote_average: 8.0,
       genres: [{ name: "Sci-Fi" }, { name: "Adventure" }],
       external_ids: { imdb_id: "tt1160419" },
       credits: {
@@ -83,6 +83,18 @@ describe("getTitleDetails", () => {
     // flatrate only — rent/buy must not leak in, this is a watchlist not a shopping guide
     expect(out.watchProviders).toEqual([{ name: "Netflix", logoUrl: "https://image.tmdb.org/t/p/w92/nf.jpg" }]);
     expect(out.watchLink).toBe("https://www.themoviedb.org/movie/1-dune/watch?locale=ZA");
+    expect(out.backdropUrl).toBe("https://image.tmdb.org/t/p/w1280/bd.jpg");
+    expect(out.tagline).toBe("Beyond fear, destiny awaits.");
+  });
+
+  it("treats a missing backdrop as null and an empty-string tagline as null", async () => {
+    mockFetchOnce({
+      id: 5, title: "No Extras", release_date: "2019-01-01",
+      tagline: "", genres: [], credits: { cast: [], crew: [] },
+    });
+    const out = await getTitleDetails(5, "MOVIE");
+    expect(out.backdropUrl).toBeNull();
+    expect(out.tagline).toBeNull();
   });
 
   it("returns empty watch providers and null link when the ZA region has no data", async () => {
