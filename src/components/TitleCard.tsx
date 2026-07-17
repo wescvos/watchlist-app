@@ -7,11 +7,19 @@ export interface CardTitle {
   year: number | null;
   posterUrl: string | null;
   myRating: number | null;
+  imdbScore: string | null;
   genres: string[];
   mediaType: MediaKind;
 }
 
-export function TitleCard({ t }: { t: CardTitle }) {
+export function TitleCard({ t, status }: { t: CardTitle; status: "WANT" | "WATCHED" }) {
+  // Personal rating only exists (and matters) once watched; Want cards show
+  // the external IMDb score instead, so the two lists read visibly differently.
+  const rating =
+    status === "WATCHED" && t.myRating != null ? `★ ${t.myRating}/10`
+    : status === "WANT" && t.imdbScore != null ? `IMDb ${t.imdbScore}`
+    : null;
+
   return (
     <Link
       href={`/title/${t.id}`}
@@ -29,7 +37,7 @@ export function TitleCard({ t }: { t: CardTitle }) {
       </div>
       <p className="mt-1 truncate text-sm font-medium">{t.title}</p>
       <p className="mt-0.5 meta">
-        {t.year ?? ""}{t.myRating != null ? ` · ★ ${t.myRating}/10` : ""}
+        {[t.year, rating].filter((v) => v != null).join(" ")}
       </p>
     </Link>
   );

@@ -294,7 +294,7 @@ export default function Home() {
         </div>
       ) : (
         <div className="mt-2 grid grid-cols-3 gap-3 sm:grid-cols-4 fade-in">
-          {displayTitles.map((t) => <TitleCard key={t.id} t={t} />)}
+          {displayTitles.map((t) => <TitleCard key={t.id} t={t} status={status} />)}
         </div>
       )}
       <Link
