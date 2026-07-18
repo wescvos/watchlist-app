@@ -7,6 +7,10 @@ import type { SearchResultWithLibrary } from "@/lib/types";
 
 type Result = SearchResultWithLibrary;
 
+const DEBOUNCE_MS = 350;
+const MIN_LIVE_QUERY_LENGTH = 2;
+const POSTER_WALL_SIZE = 12;
+
 // Isolated so only this reads the URL — keeps the rest of the page server-rendered
 // instead of the whole tree bailing to client-only rendering for useSearchParams.
 function UrlQuerySync({ onQuery }: { onQuery: (term: string) => void }) {
@@ -25,8 +29,12 @@ export default function SearchPage() {
   const [searched, setSearched] = useState(false);
   const [searchedFor, setSearchedFor] = useState("");
   const [searchError, setSearchError] = useState("");
+  const [wallPosters, setWallPosters] = useState<string[]>([]);
   const router = useRouter();
   const searchedForRef = useRef("");
+  const requestIdRef = useRef(0);
+  const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const skipInitialDebounce = useRef(true);
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Belt-and-suspenders alongside the native autoFocus attribute below: some
@@ -35,21 +43,59 @@ export default function SearchPage() {
     inputRef.current?.focus();
   }, []);
 
+  // Decorative poster wall for the pre-search state, built from the library
+  // (Want first, padded with Watched if thin). Non-blocking: the plain state
+  // renders immediately and the wall fades in when data lands; a failure just
+  // leaves the plain glyph state.
+  useEffect(() => {
+    let ignore = false;
+    async function loadPosters(status: "WANT" | "WATCHED"): Promise<string[]> {
+      const res = await fetch(`/api/titles?status=${status}`);
+      if (!res.ok) return [];
+      const titles: { posterUrl: string | null }[] = await res.json();
+      return titles.map((t) => t.posterUrl).filter((u): u is string => u != null);
+    }
+    (async () => {
+      try {
+        let posters = await loadPosters("WANT");
+        if (posters.length < POSTER_WALL_SIZE) posters = posters.concat(await loadPosters("WATCHED"));
+        if (!ignore) {
+          // w185 is plenty for small muted tiles — swap the stored URL's size segment.
+          setWallPosters(posters.slice(0, POSTER_WALL_SIZE).map((u) => u.replace("/w500/", "/w185/")));
+        }
+      } catch {
+        // Decorative only.
+      }
+    })();
+    return () => {
+      ignore = true;
+    };
+  }, []);
+
   const performSearch = useCallback(async (term: string) => {
+    // Mark this term as in-flight synchronously so the debounce effect and
+    // UrlQuerySync never double-fire a search for the same term.
+    searchedForRef.current = term;
+    const requestId = ++requestIdRef.current;
+    const isCurrent = () => requestId === requestIdRef.current;
     setBusy(true);
     setSearchError("");
     try {
       const res = await fetch(`/api/search?q=${encodeURIComponent(term)}`);
       if (!res.ok) throw new Error();
-      setResults(await res.json());
+      const data: Result[] = await res.json();
+      if (!isCurrent()) return; // an older response must never overwrite a newer one
+      setResults(data);
     } catch {
+      if (!isCurrent()) return;
       setResults([]);
       setSearchError("Search isn't responding right now. Try again in a moment.");
     } finally {
-      searchedForRef.current = term;
-      setSearchedFor(term);
-      setSearched(true);
-      setBusy(false);
+      if (isCurrent()) {
+        setSearchedFor(term);
+        setSearched(true);
+        setBusy(false);
+      }
     }
   }, []);
 
@@ -59,6 +105,46 @@ export default function SearchPage() {
     setQ(term);
     performSearch(term);
   }, [performSearch]);
+
+  // Live search: fire once, ~350ms after typing stops, for queries of 2+
+  // characters. The URL is synced when the search fires (not per keystroke),
+  // via replace, so history never fills with per-character entries.
+  useEffect(() => {
+    if (skipInitialDebounce.current) {
+      // The mount run still sees the pre-restore q="" — resetting here would
+      // cancel a URL-restore search that UrlQuerySync (child effect, runs
+      // first) may have just started.
+      skipInitialDebounce.current = false;
+      return;
+    }
+    const term = q.trim();
+    if (term.length < MIN_LIVE_QUERY_LENGTH) {
+      // Deleting below the threshold returns to the pre-search state — unless
+      // this exact short term is already being searched (restored from the
+      // URL or submitted explicitly), which we leave alone. The ref-is-empty
+      // check makes the reset idempotent (ref "" ⇒ state already clean), so
+      // an effect re-run can never loop on fresh state churn.
+      if (searchedForRef.current !== "" && term !== searchedForRef.current) {
+        searchedForRef.current = "";
+        requestIdRef.current++; // discard any in-flight response
+        setResults([]);
+        setSearched(false);
+        setSearchedFor("");
+        setSearchError("");
+        setBusy(false);
+      }
+      return;
+    }
+    if (term === searchedForRef.current) return; // already searched or in flight
+    debounceTimer.current = setTimeout(() => {
+      if (term === searchedForRef.current) return; // e.g. Enter fired it first
+      performSearch(term);
+      router.replace(`/search?q=${encodeURIComponent(term)}`, { scroll: false });
+    }, DEBOUNCE_MS);
+    return () => {
+      if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    };
+  }, [q, performSearch, router]);
 
   async function run(e: React.FormEvent) {
     e.preventDefault();
@@ -70,14 +156,19 @@ export default function SearchPage() {
   }
 
   // Wipe the query and everything downstream of it, returning to the initial
-  // pre-search state. The URL's ?q is cleared too so the cleared slate survives
-  // a reload (and searchedForRef reset keeps a re-typed identical term working).
+  // pre-search state. Cancels any pending debounce and invalidates in-flight
+  // requests so a stale response can't repopulate results after clearing. The
+  // URL's ?q is cleared too so the cleared slate survives a reload (and
+  // searchedForRef reset keeps a re-typed identical term working).
   function clearSearch() {
+    if (debounceTimer.current) clearTimeout(debounceTimer.current);
+    requestIdRef.current++;
     setQ("");
     setResults([]);
     setSearched(false);
     setSearchedFor("");
     setSearchError("");
+    setBusy(false);
     searchedForRef.current = "";
     router.replace("/search", { scroll: false });
     inputRef.current?.focus();
@@ -127,7 +218,10 @@ export default function SearchPage() {
         </button>
       </form>
 
-      {busy ? (
+      {busy && results.length === 0 ? (
+        /* Skeletons only for a search from empty — when results are already on
+           screen, a keystroke-triggered re-search keeps them visible with a
+           subtle busy indicator instead of flashing skeletons. */
         <ul className="space-y-2" aria-hidden="true">
           {[0, 1, 2].map((i) => (
             <li key={i} className="flex items-center gap-3 rounded-lg border border-black/5 p-2 dark:border-white/5">
@@ -143,10 +237,10 @@ export default function SearchPage() {
         <p role="alert" className="py-16 text-center text-sm text-red-600 dark:text-red-400">{searchError}</p>
       ) : results.length > 0 ? (
         <>
-          <p className="mb-2 meta">
-            {results.length} result{results.length === 1 ? "" : "s"}
+          <p className={`mb-2 meta ${busy ? "animate-pulse motion-reduce:animate-none" : ""}`}>
+            {busy ? "Searching…" : `${results.length} result${results.length === 1 ? "" : "s"}`}
           </p>
-          <ul className="space-y-2 fade-in">
+          <ul className={`space-y-2 fade-in transition-opacity ${busy ? "opacity-60" : ""}`}>
             {results.map((r) => (
               <li key={`${r.mediaType}-${r.tmdbId}`}>
                 <Link
@@ -178,6 +272,24 @@ export default function SearchPage() {
         <div className="py-16 text-center">
           <p className="font-medium">No matches for “{searchedFor}”</p>
           <p className="mt-1 text-sm text-gray-500">Check the spelling or try another title.</p>
+        </div>
+      ) : wallPosters.length > 0 ? (
+        /* The app's front door: a muted mosaic of the library's own posters,
+           purely decorative, with the empty-state line as a title over it. */
+        <div className="relative fade-in">
+          <div aria-hidden="true" className="grid grid-cols-4 gap-2 sm:grid-cols-6">
+            {wallPosters.map((src, i) => (
+              <div key={i} className="aspect-[2/3] overflow-hidden rounded-md bg-gray-100 dark:bg-white/5">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={src} alt="" loading="lazy" className="h-full w-full object-cover opacity-25 dark:opacity-20" />
+              </div>
+            ))}
+          </div>
+          <div aria-hidden="true" className="pointer-events-none absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-background" />
+          <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
+            <p className="font-medium">Find something to watch</p>
+            <p className="mt-1 meta">Search movies and series to add to your list</p>
+          </div>
         </div>
       ) : (
         <div className="flex flex-col items-center py-16 text-center">
