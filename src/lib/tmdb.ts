@@ -65,8 +65,39 @@ async function tmdbGet(pathname: string, params: Record<string, string> = {}) {
   throw new Error(`TMDb ${pathname} failed: exhausted retries`);
 }
 
-export async function searchTitles(q: string): Promise<SearchResult[]> {
-  const data = await tmdbGet("/search/multi", { query: q, include_adult: "false" });
+// TMDb's search is strict about spelling, so a query with an extra word or a
+// leading article can return nothing even when the title exists. When the raw
+// query comes back empty we retry with progressively simpler queries. This
+// only helps word-boundary / extra-word mismatches; it does NOT fix a
+// mistyped character inside a word (that would need real spell correction).
+const MAX_SEARCH_ATTEMPTS = 4;
+const LEADING_ARTICLE = /^(the|a|an)\s+/i;
+
+// Ordered from the exact query to progressively looser ones: drop trailing
+// words one at a time (down to a single word), then, as a last resort, drop a
+// leading article. Deduped, empties removed, and capped so a long garbage
+// query can't fan out into many API calls.
+export function relaxationCandidates(query: string): string[] {
+  const candidates: string[] = [];
+  const push = (s: string) => {
+    const t = s.trim();
+    if (t && !candidates.includes(t)) candidates.push(t);
+  };
+
+  push(query);
+
+  const words = query.trim().split(/\s+/);
+  for (let end = words.length - 1; end >= 1; end--) {
+    push(words.slice(0, end).join(" "));
+  }
+
+  push(query.replace(LEADING_ARTICLE, ""));
+
+  return candidates.slice(0, MAX_SEARCH_ATTEMPTS);
+}
+
+async function searchOnce(query: string): Promise<SearchResult[]> {
+  const data = await tmdbGet("/search/multi", { query, include_adult: "false" });
   return (data.results ?? [])
     .filter((r: any) => r.media_type === "movie" || r.media_type === "tv")
     .map((r: any): SearchResult => {
@@ -81,6 +112,19 @@ export async function searchTitles(q: string): Promise<SearchResult[]> {
         voteCount: typeof r.vote_count === "number" ? r.vote_count : 0,
       };
     });
+}
+
+export async function searchTitles(q: string): Promise<SearchResult[]> {
+  // Strictly a zero-results rescue: the first (exact) query runs exactly as
+  // before, and relaxation only kicks in when it yields nothing — so a working
+  // search never gets slower or worse. Errors from any attempt propagate
+  // (never swallowed by the loop).
+  let results: SearchResult[] = [];
+  for (const candidate of relaxationCandidates(q)) {
+    results = await searchOnce(candidate);
+    if (results.length > 0) break;
+  }
+  return results;
 }
 
 export async function getTitleDetails(tmdbId: number, mediaType: MediaKind): Promise<TmdbDetails> {

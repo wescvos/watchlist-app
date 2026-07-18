@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { searchTitles, getTitleDetails } from "@/lib/tmdb";
+import { searchTitles, getTitleDetails, relaxationCandidates } from "@/lib/tmdb";
 
 beforeEach(() => { process.env.TMDB_API_KEY = "k"; });
 afterEach(() => { vi.restoreAllMocks(); });
@@ -9,6 +9,18 @@ function mockFetchOnce(json: unknown) {
     new Response(JSON.stringify(json), { status: 200 }),
   );
 }
+
+// Responds based on the `query` param TMDb receives, so tests can assert both
+// which relaxed query finally matched and how many calls it took.
+function mockFetchByQuery(resultsFor: (query: string) => unknown[]) {
+  return vi.spyOn(global, "fetch").mockImplementation(async (input: RequestInfo | URL) => {
+    const query = new URL(String(input)).searchParams.get("query") ?? "";
+    return new Response(JSON.stringify({ results: resultsFor(query) }), { status: 200 });
+  });
+}
+
+const MOVIE = { media_type: "movie", id: 1, title: "Inception", release_date: "2010-07-15", poster_path: "/a.jpg", popularity: 50, vote_count: 100 };
+const TV = { media_type: "tv", id: 2, name: "The Expanse", first_air_date: "2015-12-14", poster_path: null };
 
 describe("searchTitles", () => {
   it("maps multi-search movie + tv, skips person", async () => {
@@ -45,6 +57,57 @@ describe("searchTitles", () => {
     const fetchSpy = vi.spyOn(global, "fetch").mockResolvedValueOnce(new Response("err", { status: 404 }));
     await expect(searchTitles("x")).rejects.toThrow(/failed: 404/);
     expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("rescues a zero-result query by dropping a trailing word", async () => {
+    const fetchSpy = mockFetchByQuery((q) => (q === "inception" ? [MOVIE] : []));
+    const out = await searchTitles("inception dreams");
+    expect(out).toHaveLength(1);
+    expect(out[0].title).toBe("Inception");
+    // "inception dreams" (empty) then "inception" (hit) — exactly two calls.
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("rescues a zero-result query by dropping a leading article", async () => {
+    const fetchSpy = mockFetchByQuery((q) => (q === "expanse" ? [TV] : []));
+    const out = await searchTitles("the expanse");
+    expect(out).toHaveLength(1);
+    expect(out[0].title).toBe("The Expanse");
+    // "the expanse" (empty), "the" (empty), then article-stripped "expanse" (hit).
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+  });
+
+  it("does NOT run any relaxation when the first query already has results", async () => {
+    // Multi-word query so relaxation candidates exist — none must be tried.
+    const fetchSpy = mockFetchByQuery((q) => (q === "the batman" ? [MOVIE] : []));
+    const out = await searchTitles("the batman");
+    expect(out).toHaveLength(1);
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it("gives up and returns empty when nothing matches, capping the calls", async () => {
+    const fetchSpy = mockFetchByQuery(() => []);
+    const out = await searchTitles("the batman begins");
+    expect(out).toEqual([]);
+    // Capped at MAX_SEARCH_ATTEMPTS (4), never more.
+    expect(fetchSpy).toHaveBeenCalledTimes(4);
+  });
+});
+
+describe("relaxationCandidates", () => {
+  it("drops trailing words one at a time, then the leading article", () => {
+    expect(relaxationCandidates("the batman begins")).toEqual([
+      "the batman begins", "the batman", "the", "batman begins",
+    ]);
+  });
+  it("adds an article-stripped variant for a two-word title", () => {
+    expect(relaxationCandidates("the expanse")).toEqual(["the expanse", "the", "expanse"]);
+  });
+  it("returns just the query for a single non-article word (no wasted attempts)", () => {
+    expect(relaxationCandidates("dune")).toEqual(["dune"]);
+  });
+  it("caps the candidate list so a long query can't fan out", () => {
+    expect(relaxationCandidates("a b c d e f").length).toBeLessThanOrEqual(4);
   });
 });
 
