@@ -69,6 +69,20 @@ export default function SearchPage() {
     router.replace(`/search?q=${encodeURIComponent(term)}`, { scroll: false });
   }
 
+  // Wipe the query and everything downstream of it, returning to the initial
+  // pre-search state. The URL's ?q is cleared too so the cleared slate survives
+  // a reload (and searchedForRef reset keeps a re-typed identical term working).
+  function clearSearch() {
+    setQ("");
+    setResults([]);
+    setSearched(false);
+    setSearchedFor("");
+    setSearchError("");
+    searchedForRef.current = "";
+    router.replace("/search", { scroll: false });
+    inputRef.current?.focus();
+  }
+
   return (
     <main className="mx-auto w-full max-w-2xl p-4 pb-24">
       <Suspense fallback={null}>
@@ -92,9 +106,21 @@ export default function SearchPage() {
             placeholder="Search movies and series"
             aria-label="Search movies and series"
             enterKeyHint="search"
-            className="w-full rounded-lg border border-black/10 bg-gray-50 py-3 pl-9 pr-3 text-base placeholder:text-gray-400 focus-visible:border-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground sm:text-sm dark:border-white/10 dark:bg-white/5"
+            className="w-full rounded-lg border border-black/10 bg-gray-50 py-3 pl-9 pr-11 text-base placeholder:text-gray-400 focus-visible:border-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground sm:text-sm dark:border-white/10 dark:bg-white/5"
             autoFocus
           />
+          {q.length > 0 && (
+            <button
+              type="button"
+              onClick={clearSearch}
+              aria-label="Clear search"
+              className="absolute right-0 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-lg text-gray-400 transition-colors hover:text-foreground active:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground"
+            >
+              <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M18 6L6 18M6 6l12 12" />
+              </svg>
+            </button>
+          )}
         </div>
         <button className="rounded-lg bg-foreground px-4 text-sm font-medium text-background transition-opacity hover:opacity-90 active:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground focus-visible:ring-offset-2 focus-visible:ring-offset-background">
           Search
