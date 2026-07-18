@@ -41,11 +41,12 @@ async function main() {
   const { refreshTitle } = await import("../src/lib/titles");
 
   const titles = await prisma.title.findMany({
+    where: { status: "WANT" },
     select: { id: true, title: true },
     orderBy: { addedAt: "asc" },
   });
 
-  console.log(`Refreshing ${titles.length} titles...\n`);
+  console.log(`Refreshing ${titles.length} "Want to watch" titles...\n`);
 
   const failures: Failure[] = [];
   let refreshed = 0;
