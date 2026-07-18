@@ -1,5 +1,5 @@
 "use client";
-import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { BackLink } from "@/components/BackLink";
@@ -59,11 +59,32 @@ export default function SearchPage() {
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const skipInitialDebounce = useRef(true);
   const inputRef = useRef<HTMLInputElement>(null);
+  const headerRef = useRef<HTMLDivElement>(null);
+  const [headerHeight, setHeaderHeight] = useState(0);
 
   // Belt-and-suspenders alongside the native autoFocus attribute below: some
   // mobile browsers only reliably open the keyboard from an imperative focus().
   useEffect(() => {
     inputRef.current?.focus();
+  }, []);
+
+  // The header is sticky, which takes it out of the normal flow height
+  // calculation the moment any CSS margin trickery gets involved (verified —
+  // a negative-margin cancellation for the safe-area padding reliably
+  // reintroduced overlap in this exact layout, for reasons that didn't hold
+  // up even in an isolated repro). Measuring the header's real rendered
+  // height and applying it as the content's padding-top sidesteps the whole
+  // question: whatever height the header actually renders at (safe-area
+  // padding, form layout, wrapping, anything), the content below it is
+  // guaranteed to start exactly there, never under it.
+  useLayoutEffect(() => {
+    const el = headerRef.current;
+    if (!el) return;
+    const measure = () => setHeaderHeight(el.getBoundingClientRect().height);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
   }, []);
 
   // Decorative poster wall for the pre-search state, built from the library
@@ -198,61 +219,65 @@ export default function SearchPage() {
   }
 
   return (
-    <main className="mx-auto w-full max-w-2xl pb-24">
-      <Suspense fallback={null}>
-        <UrlQuerySync onQuery={handleUrlQuery} />
-      </Suspense>
-      {/* Sticky with its own safe-area padding (not just inherited from
-          body's) so the header stays pinned below the status bar even when
-          the on-screen keyboard's focus-scroll behavior shoves the page
-          upward. The negative top margin cancels the static-position offset
-          from body's own safe-area padding, so the unstuck/unscrolled
-          position is unchanged; the positive top padding is what keeps
-          content clear of the status bar once this sticks flush to the
-          viewport top (sticky positioning ignores an ancestor's padding once
-          stuck, which is exactly what let the header get swept past it). */}
-      <div className="sticky top-0 z-10 mt-[calc(env(safe-area-inset-top)*-1)] bg-background px-4 pt-[calc(env(safe-area-inset-top)+1rem)]">
-        <div className="mb-4 flex items-center gap-2">
-          <BackLink href="/" label="Back to watchlist" />
-          <h1 className="text-lg font-semibold tracking-tight">Search</h1>
-        </div>
-
-        <form onSubmit={run} className="mb-5 flex gap-2">
-          <div className="relative flex-1">
-            <svg viewBox="0 0 24 24" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <circle cx="11" cy="11" r="7" />
-              <path d="M21 21l-3.5-3.5" />
-            </svg>
-            <input
-              ref={inputRef}
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="Search movies and series"
-              aria-label="Search movies and series"
-              enterKeyHint="search"
-              className="w-full rounded-lg border border-black/10 bg-gray-50 py-3 pl-9 pr-11 text-base placeholder:text-gray-400 focus-visible:border-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground sm:text-sm dark:border-white/10 dark:bg-white/5"
-              autoFocus
-            />
-            {q.length > 0 && (
-              <button
-                type="button"
-                onClick={clearSearch}
-                aria-label="Clear search"
-                className="absolute right-0 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-lg text-gray-400 transition-colors hover:text-foreground active:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground"
-              >
-                <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M18 6L6 18M6 6l12 12" />
-                </svg>
-              </button>
-            )}
+    <>
+      {/* Fixed (not sticky) with its own safe-area padding, so the header
+          stays pinned below the status bar at all times — including when the
+          on-screen keyboard's focus-scroll behavior shoves the page upward —
+          regardless of scroll position. Genuinely fixed elements contribute
+          zero height to document flow, unlike sticky (which always reserves
+          its natural flow space even while pinned); the corresponding
+          <main> gets its real rendered height measured via ResizeObserver
+          and applied as padding-top below, so content starts exactly where
+          the header ends, never under it, whatever that height turns out to
+          be — no fragile margin-cancellation arithmetic to get subtly wrong. */}
+      <div ref={headerRef} className="fixed inset-x-0 top-0 z-10 bg-background">
+        <div className="mx-auto w-full max-w-2xl px-4 pt-[calc(env(safe-area-inset-top)+1rem)]">
+          <div className="mb-4 flex items-center gap-2">
+            <BackLink href="/" label="Back to watchlist" />
+            <h1 className="text-lg font-semibold tracking-tight">Search</h1>
           </div>
-          <button className="rounded-lg bg-foreground px-4 text-sm font-medium text-background transition-opacity hover:opacity-90 active:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground focus-visible:ring-offset-2 focus-visible:ring-offset-background">
-            Search
-          </button>
-        </form>
+
+          <form onSubmit={run} className="mb-5 flex gap-2">
+            <div className="relative flex-1">
+              <svg viewBox="0 0 24 24" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <circle cx="11" cy="11" r="7" />
+                <path d="M21 21l-3.5-3.5" />
+              </svg>
+              <input
+                ref={inputRef}
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="Search movies and series"
+                aria-label="Search movies and series"
+                enterKeyHint="search"
+                className="w-full rounded-lg border border-black/10 bg-gray-50 py-3 pl-9 pr-11 text-base placeholder:text-gray-400 focus-visible:border-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground sm:text-sm dark:border-white/10 dark:bg-white/5"
+                autoFocus
+              />
+              {q.length > 0 && (
+                <button
+                  type="button"
+                  onClick={clearSearch}
+                  aria-label="Clear search"
+                  className="absolute right-0 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-lg text-gray-400 transition-colors hover:text-foreground active:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground"
+                >
+                  <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M18 6L6 18M6 6l12 12" />
+                  </svg>
+                </button>
+              )}
+            </div>
+            <button className="rounded-lg bg-foreground px-4 text-sm font-medium text-background transition-opacity hover:opacity-90 active:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground focus-visible:ring-offset-2 focus-visible:ring-offset-background">
+              Search
+            </button>
+          </form>
+        </div>
       </div>
 
-      <div className="px-4">
+      <main className="mx-auto w-full max-w-2xl mt-[calc(env(safe-area-inset-top)*-1)] pb-24" style={{ paddingTop: headerHeight }}>
+        <Suspense fallback={null}>
+          <UrlQuerySync onQuery={handleUrlQuery} />
+        </Suspense>
+        <div className="px-4">
         {busy && results.length === 0 ? (
           /* Skeletons only for a search from empty — when results are already
              on screen, a keystroke-triggered re-search keeps them visible
@@ -340,7 +365,8 @@ export default function SearchPage() {
             <p className="mt-1 text-sm text-gray-500">Search movies and series to add to your list.</p>
           </div>
         )}
-      </div>
-    </main>
+        </div>
+      </main>
+    </>
   );
 }
