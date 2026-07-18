@@ -196,7 +196,8 @@ describe("poster wall", () => {
       "https://image.tmdb.org/t/p/w185/b.jpg",
       "https://image.tmdb.org/t/p/w185/c.jpg",
     ]);
-    expect(screen.getByText("Find something to watch")).toBeInTheDocument();
+    // No overlay headline on the wall itself — redundant with the input's placeholder.
+    expect(screen.queryByText("Find something to watch")).not.toBeInTheDocument();
   });
 
   it("falls back to the plain glyph state when the library has no posters", async () => {
@@ -218,7 +219,6 @@ describe("poster wall", () => {
     const tiles = Array.from(container.querySelectorAll("img")).map((img) => img.getAttribute("src"));
     expect(tiles).toHaveLength(20);
     expect(tiles).not.toContain("https://image.tmdb.org/t/p/w185/should-not-appear.jpg");
-    expect(screen.getByText("Find something to watch")).toBeInTheDocument();
     expect(titlesCalls).toEqual([]);
   });
 

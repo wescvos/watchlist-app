@@ -198,142 +198,149 @@ export default function SearchPage() {
   }
 
   return (
-    <main className="mx-auto w-full max-w-2xl p-4 pb-24">
+    <main className="mx-auto w-full max-w-2xl pb-24">
       <Suspense fallback={null}>
         <UrlQuerySync onQuery={handleUrlQuery} />
       </Suspense>
-      <div className="mb-4 flex items-center gap-2">
-        <BackLink href="/" label="Back to watchlist" />
-        <h1 className="text-lg font-semibold tracking-tight">Search</h1>
+      {/* Sticky with its own safe-area padding (not just inherited from
+          body's) so the header stays pinned below the status bar even when
+          the on-screen keyboard's focus-scroll behavior shoves the page
+          upward. The negative top margin cancels the static-position offset
+          from body's own safe-area padding, so the unstuck/unscrolled
+          position is unchanged; the positive top padding is what keeps
+          content clear of the status bar once this sticks flush to the
+          viewport top (sticky positioning ignores an ancestor's padding once
+          stuck, which is exactly what let the header get swept past it). */}
+      <div className="sticky top-0 z-10 mt-[calc(env(safe-area-inset-top)*-1)] bg-background px-4 pt-[calc(env(safe-area-inset-top)+1rem)]">
+        <div className="mb-4 flex items-center gap-2">
+          <BackLink href="/" label="Back to watchlist" />
+          <h1 className="text-lg font-semibold tracking-tight">Search</h1>
+        </div>
+
+        <form onSubmit={run} className="mb-5 flex gap-2">
+          <div className="relative flex-1">
+            <svg viewBox="0 0 24 24" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <circle cx="11" cy="11" r="7" />
+              <path d="M21 21l-3.5-3.5" />
+            </svg>
+            <input
+              ref={inputRef}
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Search movies and series"
+              aria-label="Search movies and series"
+              enterKeyHint="search"
+              className="w-full rounded-lg border border-black/10 bg-gray-50 py-3 pl-9 pr-11 text-base placeholder:text-gray-400 focus-visible:border-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground sm:text-sm dark:border-white/10 dark:bg-white/5"
+              autoFocus
+            />
+            {q.length > 0 && (
+              <button
+                type="button"
+                onClick={clearSearch}
+                aria-label="Clear search"
+                className="absolute right-0 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-lg text-gray-400 transition-colors hover:text-foreground active:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground"
+              >
+                <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M18 6L6 18M6 6l12 12" />
+                </svg>
+              </button>
+            )}
+          </div>
+          <button className="rounded-lg bg-foreground px-4 text-sm font-medium text-background transition-opacity hover:opacity-90 active:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground focus-visible:ring-offset-2 focus-visible:ring-offset-background">
+            Search
+          </button>
+        </form>
       </div>
 
-      <form onSubmit={run} className="mb-5 flex gap-2">
-        <div className="relative flex-1">
-          <svg viewBox="0 0 24 24" className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <circle cx="11" cy="11" r="7" />
-            <path d="M21 21l-3.5-3.5" />
-          </svg>
-          <input
-            ref={inputRef}
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            placeholder="Search movies and series"
-            aria-label="Search movies and series"
-            enterKeyHint="search"
-            className="w-full rounded-lg border border-black/10 bg-gray-50 py-3 pl-9 pr-11 text-base placeholder:text-gray-400 focus-visible:border-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground sm:text-sm dark:border-white/10 dark:bg-white/5"
-            autoFocus
-          />
-          {q.length > 0 && (
-            <button
-              type="button"
-              onClick={clearSearch}
-              aria-label="Clear search"
-              className="absolute right-0 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-lg text-gray-400 transition-colors hover:text-foreground active:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground"
-            >
-              <svg viewBox="0 0 24 24" className="h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="M18 6L6 18M6 6l12 12" />
-              </svg>
-            </button>
-          )}
-        </div>
-        <button className="rounded-lg bg-foreground px-4 text-sm font-medium text-background transition-opacity hover:opacity-90 active:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground focus-visible:ring-offset-2 focus-visible:ring-offset-background">
-          Search
-        </button>
-      </form>
-
-      {busy && results.length === 0 ? (
-        /* Skeletons only for a search from empty — when results are already on
-           screen, a keystroke-triggered re-search keeps them visible with a
-           subtle busy indicator instead of flashing skeletons. */
-        <ul className="space-y-2" aria-hidden="true">
-          {[0, 1, 2].map((i) => (
-            <li key={i} className="flex items-center gap-3 rounded-lg border border-black/5 p-2 dark:border-white/5">
-              <div className="h-20 w-14 flex-shrink-0 animate-pulse rounded bg-gray-200 motion-reduce:animate-none dark:bg-white/10" />
-              <div className="min-w-0 flex-1 space-y-2">
-                <div className="h-4 w-2/3 animate-pulse rounded bg-gray-200 motion-reduce:animate-none dark:bg-white/10" />
-                <div className="h-3 w-1/3 animate-pulse rounded bg-gray-200 motion-reduce:animate-none dark:bg-white/10" />
-              </div>
-            </li>
-          ))}
-        </ul>
-      ) : searchError ? (
-        <p role="alert" className="py-16 text-center text-sm text-red-600 dark:text-red-400">{searchError}</p>
-      ) : results.length > 0 ? (
-        <>
-          <p className={`mb-2 meta ${busy ? "animate-pulse motion-reduce:animate-none" : ""}`}>
-            {busy ? "Searching…" : `${results.length} result${results.length === 1 ? "" : "s"}`}
-          </p>
-          <ul className={`space-y-2 fade-in transition-opacity ${busy ? "opacity-60" : ""}`}>
-            {results.map((r) => (
-              <li key={`${r.mediaType}-${r.tmdbId}`}>
-                <Link
-                  href={r.library ? `/title/${r.library.id}` : `/preview/${r.mediaType.toLowerCase()}/${r.tmdbId}`}
-                  className="flex items-center gap-3 rounded-lg border border-black/8 p-2 transition-colors hover:bg-gray-100 active:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground dark:border-white/10 dark:hover:bg-white/10 dark:active:bg-white/10"
-                >
-                  <div className="h-20 w-14 flex-shrink-0 overflow-hidden rounded bg-gray-100 ring-1 ring-black/5 dark:bg-white/5 dark:ring-white/10">
-                    {r.posterUrl && /* eslint-disable-next-line @next/next/no-img-element */
-                      <img src={r.posterUrl} alt="" className="h-full w-full object-cover" />}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate font-medium">{r.title}</p>
-                    <p className="mt-0.5 meta">
-                      {r.mediaType === "TV" ? "TV" : "Movie"}{r.year ? ` · ${r.year}` : ""}
-                    </p>
-                    {r.library && (
-                      <p className="mt-0.5 meta">{r.library.status === "WATCHED" ? "Watched" : "On list"}</p>
-                    )}
-                  </div>
-                  <svg viewBox="0 0 24 24" className="h-4 w-4 flex-shrink-0 text-gray-300 dark:text-white/20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                    <path d="M9 6l6 6-6 6" />
-                  </svg>
-                </Link>
+      <div className="px-4">
+        {busy && results.length === 0 ? (
+          /* Skeletons only for a search from empty — when results are already
+             on screen, a keystroke-triggered re-search keeps them visible
+             with a subtle busy indicator instead of flashing skeletons. */
+          <ul className="space-y-2" aria-hidden="true">
+            {[0, 1, 2].map((i) => (
+              <li key={i} className="flex items-center gap-3 rounded-lg border border-black/5 p-2 dark:border-white/5">
+                <div className="h-20 w-14 flex-shrink-0 animate-pulse rounded bg-gray-200 motion-reduce:animate-none dark:bg-white/10" />
+                <div className="min-w-0 flex-1 space-y-2">
+                  <div className="h-4 w-2/3 animate-pulse rounded bg-gray-200 motion-reduce:animate-none dark:bg-white/10" />
+                  <div className="h-3 w-1/3 animate-pulse rounded bg-gray-200 motion-reduce:animate-none dark:bg-white/10" />
+                </div>
               </li>
             ))}
           </ul>
-        </>
-      ) : searched ? (
-        <div className="py-16 text-center">
-          <p className="font-medium">No matches for “{searchedFor}”</p>
-          <p className="mt-1 text-sm text-gray-500">Check the spelling or try another title.</p>
-        </div>
-      ) : wallPosters.length > 0 ? (
-        /* The app's front door: a muted mosaic of the library's own posters,
-           purely decorative, with the empty-state line as a title over it.
-           Tiles render at full brightness — a single uniform scrim on top
-           (not per-tile opacity) is what mutes them, so a bright poster and a
-           dark one recede by the same amount instead of the wall looking
-           patchy. The bottom fade and the text's own radial scrim layer on
-           top of that, same technique family as the detail-page backdrop. */
-        <div className="relative min-h-[65vh] overflow-hidden fade-in">
-          <div aria-hidden="true" className="grid grid-cols-4 gap-2 sm:grid-cols-6">
-            {wallPosters.map((src, i) => (
-              <div key={i} className="aspect-[2/3] overflow-hidden rounded-md bg-gray-100 dark:bg-white/5">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={src} alt="" loading="lazy" className="h-full w-full object-cover" />
-              </div>
-            ))}
+        ) : searchError ? (
+          <p role="alert" className="py-16 text-center text-sm text-red-600 dark:text-red-400">{searchError}</p>
+        ) : results.length > 0 ? (
+          <>
+            <p className={`mb-2 meta ${busy ? "animate-pulse motion-reduce:animate-none" : ""}`}>
+              {busy ? "Searching…" : `${results.length} result${results.length === 1 ? "" : "s"}`}
+            </p>
+            <ul className={`space-y-2 fade-in transition-opacity ${busy ? "opacity-60" : ""}`}>
+              {results.map((r) => (
+                <li key={`${r.mediaType}-${r.tmdbId}`}>
+                  <Link
+                    href={r.library ? `/title/${r.library.id}` : `/preview/${r.mediaType.toLowerCase()}/${r.tmdbId}`}
+                    className="flex items-center gap-3 rounded-lg border border-black/8 p-2 transition-colors hover:bg-gray-100 active:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground dark:border-white/10 dark:hover:bg-white/10 dark:active:bg-white/10"
+                  >
+                    <div className="h-20 w-14 flex-shrink-0 overflow-hidden rounded bg-gray-100 ring-1 ring-black/5 dark:bg-white/5 dark:ring-white/10">
+                      {r.posterUrl && /* eslint-disable-next-line @next/next/no-img-element */
+                        <img src={r.posterUrl} alt="" className="h-full w-full object-cover" />}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-medium">{r.title}</p>
+                      <p className="mt-0.5 meta">
+                        {r.mediaType === "TV" ? "TV" : "Movie"}{r.year ? ` · ${r.year}` : ""}
+                      </p>
+                      {r.library && (
+                        <p className="mt-0.5 meta">{r.library.status === "WATCHED" ? "Watched" : "On list"}</p>
+                      )}
+                    </div>
+                    <svg viewBox="0 0 24 24" className="h-4 w-4 flex-shrink-0 text-gray-300 dark:text-white/20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M9 6l6 6-6 6" />
+                    </svg>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </>
+        ) : searched ? (
+          <div className="py-16 text-center">
+            <p className="font-medium">No matches for “{searchedFor}”</p>
+            <p className="mt-1 text-sm text-gray-500">Check the spelling or try another title.</p>
           </div>
-          <div aria-hidden="true" className="pointer-events-none absolute inset-0 bg-background/75" />
-          <div aria-hidden="true" className="pointer-events-none absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-background" />
-          <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
-            <div
-              aria-hidden="true"
-              className="pointer-events-none absolute left-1/2 top-1/2 h-40 w-64 max-w-[85%] -translate-x-1/2 -translate-y-1/2 bg-[radial-gradient(ellipse_at_center,var(--background)_0%,transparent_70%)]"
-            />
-            <p className="relative font-medium">Find something to watch</p>
+        ) : wallPosters.length > 0 ? (
+          /* The app's front door: a muted mosaic of the library's own
+             posters, purely decorative — no overlay text (redundant with the
+             input's own placeholder above it). Tiles render at full
+             brightness — a single uniform scrim on top (not per-tile
+             opacity) is what mutes them, so a bright poster and a dark one
+             recede by the same amount instead of the wall looking patchy.
+             The bottom fade eases it into the page background, same
+             technique family as the detail-page backdrop. */
+          <div className="relative min-h-[65vh] overflow-hidden fade-in">
+            <div aria-hidden="true" className="grid grid-cols-4 gap-2 sm:grid-cols-6">
+              {wallPosters.map((src, i) => (
+                <div key={i} className="aspect-[2/3] overflow-hidden rounded-md bg-gray-100 dark:bg-white/5">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={src} alt="" loading="lazy" className="h-full w-full object-cover" />
+                </div>
+              ))}
+            </div>
+            <div aria-hidden="true" className="pointer-events-none absolute inset-0 bg-background/75" />
+            <div aria-hidden="true" className="pointer-events-none absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-background" />
           </div>
-        </div>
-      ) : (
-        <div className="flex flex-col items-center py-16 text-center">
-          <svg viewBox="0 0 48 48" className="h-14 w-14 text-gray-300 dark:text-white/15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <rect x="14" y="10" width="24" height="32" rx="2" />
-            <rect x="8" y="14" width="8" height="28" rx="2" className="text-gray-200 dark:text-white/10" />
-            <path d="M24 22v8M20 26h8" className="opacity-70" />
-          </svg>
-          <p className="mt-4 font-medium">Find something to watch</p>
-          <p className="mt-1 text-sm text-gray-500">Search movies and series to add to your list.</p>
-        </div>
-      )}
+        ) : (
+          <div className="flex flex-col items-center py-16 text-center">
+            <svg viewBox="0 0 48 48" className="h-14 w-14 text-gray-300 dark:text-white/15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <rect x="14" y="10" width="24" height="32" rx="2" />
+              <rect x="8" y="14" width="8" height="28" rx="2" className="text-gray-200 dark:text-white/10" />
+              <path d="M24 22v8M20 26h8" className="opacity-70" />
+            </svg>
+            <p className="mt-4 font-medium">Find something to watch</p>
+            <p className="mt-1 text-sm text-gray-500">Search movies and series to add to your list.</p>
+          </div>
+        )}
+      </div>
     </main>
   );
 }

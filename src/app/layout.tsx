@@ -28,6 +28,13 @@ export const viewport = {
   initialScale: 1,
   themeColor: "#000000",
   viewportFit: "cover",
+  // Tells the browser to resize the layout viewport itself around the
+  // on-screen keyboard rather than just panning/scrolling the page to reveal
+  // the focused input — reduces how far (and how unpredictably) the page
+  // gets shoved when the keyboard opens. Support varies by browser/OS
+  // version; the sticky, self-padded header in the search page is the
+  // guarantee that holds regardless.
+  interactiveWidget: "resizes-content",
 };
 
 export default function RootLayout({
