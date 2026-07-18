@@ -1,0 +1,21 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <!--
+    Concept: abstract corner crop/registration marks implying a frame, not a
+    letter or literal glyph. Kept well inset from the edges (140px margin on
+    a 512 canvas, ~27%) so the marks read cleanly at small sizes and are
+    never touched by iOS's own rounded-corner (squircle) mask on top.
+    Off-white on the app's existing dark background (#0a0a0a, same as the
+    manifest/splash background_color) — no new color introduced.
+  -->
+  <rect width="512" height="512" fill="#0a0a0a" />
+  <g stroke="#ededed" stroke-width="16" stroke-linecap="square" fill="none">
+    <!-- top-left -->
+    <path d="M140 210 V140 H210" />
+    <!-- top-right -->
+    <path d="M372 210 V140 H302" />
+    <!-- bottom-left -->
+    <path d="M140 302 V372 H210" />
+    <!-- bottom-right -->
+    <path d="M372 302 V372 H302" />
+  </g>
+</svg>
