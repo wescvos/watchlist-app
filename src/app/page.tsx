@@ -5,8 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { ListToggle } from "@/components/ListToggle";
 import { TitleCard, type CardTitle } from "@/components/TitleCard";
 import type { MediaKind } from "@/lib/types";
-
-type Status = "WANT" | "WATCHED";
+import { listCache, type ListState, type Status } from "@/lib/listCache";
 
 // Isolated so only this reads the URL — keeps the rest of the page server-rendered
 // instead of the whole tree bailing to client-only rendering for useSearchParams.
@@ -42,22 +41,8 @@ function UrlTypeSync({ onType }: { onType: (t: MediaKind | null) => void }) {
   return null;
 }
 
-interface ListState {
-  titles: CardTitle[];
-  loaded: boolean;
-  fetching: boolean;
-  error: boolean;
-}
-
-const emptyListState: ListState = { titles: [], loaded: false, fetching: false, error: false };
 const STATUSES: Status[] = ["WANT", "WATCHED"];
 const SORT_CAPTION: Record<Status, string> = { WANT: "By date added", WATCHED: "By date watched" };
-
-// Module-level so it survives a Home remount (e.g. Back from a title detail
-// page), not just tab switches within one mount — otherwise the return trip
-// shows an empty skeleton for a beat, which visually breaks scroll restoration
-// even though the browser technically restored the scroll offset underneath.
-const listCache: Record<Status, ListState> = { WANT: emptyListState, WATCHED: emptyListState };
 
 export default function Home() {
   const [status, setStatus] = useState<Status>("WANT");

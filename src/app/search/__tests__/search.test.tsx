@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, act } from "@testing-library/react";
 import SearchPage from "@/app/search/page";
+import { listCache, emptyListState, type Status } from "@/lib/listCache";
+import type { CardTitle } from "@/components/TitleCard";
 
 // The router object must be a single stable instance, matching the real
 // useRouter — a fresh object per call invalidates effect deps on every render.
@@ -32,11 +34,13 @@ function installFetch(opts?: {
   deferSearch?: boolean;
 }) {
   const searchCalls: string[] = [];
+  const titlesCalls: string[] = [];
   const pending = new Map<string, (v: unknown[]) => void>();
   const mock = vi.fn(async (url: string) => {
     const u = new URL(url, "http://localhost");
     if (u.pathname === "/api/titles") {
-      const status = u.searchParams.get("status");
+      const status = u.searchParams.get("status") ?? "";
+      titlesCalls.push(status);
       const rows = status === "WANT" ? (opts?.wallWant ?? []) : (opts?.wallWatched ?? []);
       return { ok: true, json: async () => rows };
     }
@@ -50,11 +54,20 @@ function installFetch(opts?: {
   vi.stubGlobal("fetch", mock as unknown as FetchLike);
   return {
     searchCalls,
+    titlesCalls,
     resolve: (q: string, value: unknown[]) => {
       pending.get(q)?.(value);
       pending.delete(q);
     },
   };
+}
+
+function cardTitle(id: string, posterUrl: string | null): CardTitle {
+  return { id, title: id, year: 2020, posterUrl, myRating: null, imdbScore: null, genres: [], mediaType: "MOVIE", pinned: false };
+}
+
+function setListCache(status: Status, titles: CardTitle[]) {
+  listCache[status] = { titles, loaded: true, fetching: false, error: false };
 }
 
 const input = () => screen.getByLabelText("Search movies and series");
@@ -67,6 +80,10 @@ beforeEach(() => {
   // and React's scheduler under the vitest worker.
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
   replaceSpy.mockClear();
+  // The shared list cache is a module-level singleton — reset it so one
+  // test's cache state can't leak into the next.
+  listCache.WANT = emptyListState;
+  listCache.WATCHED = emptyListState;
 });
 afterEach(() => {
   vi.useRealTimers();
@@ -188,5 +205,45 @@ describe("poster wall", () => {
     await flush();
     expect(container.querySelectorAll("img").length).toBe(0);
     expect(screen.getByText("Find something to watch")).toBeInTheDocument();
+  });
+
+  it("renders instantly from Home's shared cache, with no fetch to /api/titles at all", () => {
+    // 20 usable Want posters — at the wall's cap, so Watched must NOT be consulted.
+    setListCache("WANT", Array.from({ length: 20 }, (_, i) => cardTitle(`w${i}`, `https://image.tmdb.org/t/p/w500/${i}.jpg`)));
+    setListCache("WATCHED", [cardTitle("watched-1", "https://image.tmdb.org/t/p/w500/should-not-appear.jpg")]);
+    const { titlesCalls } = installFetch();
+    const { container } = render(<SearchPage />);
+    // No `await flush()` — the assertion runs against the very first render,
+    // proving the cache read is synchronous (no fetch round trip in between).
+    const tiles = Array.from(container.querySelectorAll("img")).map((img) => img.getAttribute("src"));
+    expect(tiles).toHaveLength(20);
+    expect(tiles).not.toContain("https://image.tmdb.org/t/p/w185/should-not-appear.jpg");
+    expect(screen.getByText("Find something to watch")).toBeInTheDocument();
+    expect(titlesCalls).toEqual([]);
+  });
+
+  it("pads with the cached Watched list when cached Want is thin, still with no fetch", () => {
+    setListCache("WANT", [cardTitle("1", "https://image.tmdb.org/t/p/w500/a.jpg")]);
+    setListCache("WATCHED", [cardTitle("2", "https://image.tmdb.org/t/p/w500/b.jpg")]);
+    const { titlesCalls } = installFetch();
+    const { container } = render(<SearchPage />);
+    const tiles = Array.from(container.querySelectorAll("img")).map((img) => img.getAttribute("src"));
+    expect(tiles).toEqual([
+      "https://image.tmdb.org/t/p/w185/a.jpg",
+      "https://image.tmdb.org/t/p/w185/b.jpg",
+    ]);
+    expect(titlesCalls).toEqual([]);
+  });
+
+  it("falls back to fetching when the shared cache is empty (cold start)", async () => {
+    // listCache is reset to emptyListState in beforeEach — nothing cached.
+    const { titlesCalls } = installFetch({
+      wallWant: [{ posterUrl: "https://image.tmdb.org/t/p/w500/cold.jpg" }],
+    });
+    const { container } = render(<SearchPage />);
+    await flush();
+    const tiles = Array.from(container.querySelectorAll("img")).map((img) => img.getAttribute("src"));
+    expect(tiles).toEqual(["https://image.tmdb.org/t/p/w185/cold.jpg"]);
+    expect(titlesCalls).toEqual(["WANT", "WATCHED"]);
   });
 });

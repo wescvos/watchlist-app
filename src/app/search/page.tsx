@@ -4,12 +4,31 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { BackLink } from "@/components/BackLink";
 import type { SearchResultWithLibrary } from "@/lib/types";
+import { listCache } from "@/lib/listCache";
 
 type Result = SearchResultWithLibrary;
 
 const DEBOUNCE_MS = 350;
 const MIN_LIVE_QUERY_LENGTH = 2;
-const POSTER_WALL_SIZE = 12;
+const POSTER_WALL_SIZE = 20;
+
+function postersFrom(titles: { posterUrl: string | null }[]): string[] {
+  return titles.map((t) => t.posterUrl).filter((u): u is string => u != null);
+}
+
+// w185 is plenty for small muted tiles — swap the stored URL's size segment.
+function toWallSize(posters: string[]): string[] {
+  return posters.slice(0, POSTER_WALL_SIZE).map((u) => u.replace("/w500/", "/w185/"));
+}
+
+// Home loads and caches both lists on mount; reuse whatever's already there
+// (computed synchronously, before first paint) instead of re-fetching — this
+// is what makes the wall appear with no visible delay on a warm navigation.
+function cachedWallPosters(): string[] {
+  let posters = postersFrom(listCache.WANT.titles);
+  if (posters.length < POSTER_WALL_SIZE) posters = posters.concat(postersFrom(listCache.WATCHED.titles));
+  return toWallSize(posters);
+}
 
 // Isolated so only this reads the URL — keeps the rest of the page server-rendered
 // instead of the whole tree bailing to client-only rendering for useSearchParams.
@@ -29,7 +48,11 @@ export default function SearchPage() {
   const [searched, setSearched] = useState(false);
   const [searchedFor, setSearchedFor] = useState("");
   const [searchError, setSearchError] = useState("");
-  const [wallPosters, setWallPosters] = useState<string[]>([]);
+  // Lazy initializer runs synchronously before first paint, so a warm
+  // navigation (Home already loaded the lists) renders the wall on the very
+  // first render — no fetch, no flash of the fallback state first.
+  const [wallPosters, setWallPosters] = useState<string[]>(cachedWallPosters);
+  const hadCachedWallPosters = useRef(wallPosters.length > 0);
   const router = useRouter();
   const searchedForRef = useRef("");
   const requestIdRef = useRef(0);
@@ -44,25 +67,25 @@ export default function SearchPage() {
   }, []);
 
   // Decorative poster wall for the pre-search state, built from the library
-  // (Want first, padded with Watched if thin). Non-blocking: the plain state
-  // renders immediately and the wall fades in when data lands; a failure just
-  // leaves the plain glyph state.
+  // (Want first, padded with Watched if thin). Skipped entirely when the
+  // shared cache already satisfied it above; only a genuinely cold load
+  // (PWA killed and reopened straight to /search) falls back to fetching
+  // directly — non-blocking, the plain state renders immediately and the
+  // wall fades in when data lands; a failure just leaves the plain glyph state.
   useEffect(() => {
+    if (hadCachedWallPosters.current) return;
     let ignore = false;
     async function loadPosters(status: "WANT" | "WATCHED"): Promise<string[]> {
       const res = await fetch(`/api/titles?status=${status}`);
       if (!res.ok) return [];
       const titles: { posterUrl: string | null }[] = await res.json();
-      return titles.map((t) => t.posterUrl).filter((u): u is string => u != null);
+      return postersFrom(titles);
     }
     (async () => {
       try {
         let posters = await loadPosters("WANT");
         if (posters.length < POSTER_WALL_SIZE) posters = posters.concat(await loadPosters("WATCHED"));
-        if (!ignore) {
-          // w185 is plenty for small muted tiles — swap the stored URL's size segment.
-          setWallPosters(posters.slice(0, POSTER_WALL_SIZE).map((u) => u.replace("/w500/", "/w185/")));
-        }
+        if (!ignore) setWallPosters(toWallSize(posters));
       } catch {
         // Decorative only.
       }
@@ -275,20 +298,29 @@ export default function SearchPage() {
         </div>
       ) : wallPosters.length > 0 ? (
         /* The app's front door: a muted mosaic of the library's own posters,
-           purely decorative, with the empty-state line as a title over it. */
-        <div className="relative fade-in">
+           purely decorative, with the empty-state line as a title over it.
+           Tiles render at full brightness — a single uniform scrim on top
+           (not per-tile opacity) is what mutes them, so a bright poster and a
+           dark one recede by the same amount instead of the wall looking
+           patchy. The bottom fade and the text's own radial scrim layer on
+           top of that, same technique family as the detail-page backdrop. */
+        <div className="relative min-h-[65vh] overflow-hidden fade-in">
           <div aria-hidden="true" className="grid grid-cols-4 gap-2 sm:grid-cols-6">
             {wallPosters.map((src, i) => (
               <div key={i} className="aspect-[2/3] overflow-hidden rounded-md bg-gray-100 dark:bg-white/5">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={src} alt="" loading="lazy" className="h-full w-full object-cover opacity-25 dark:opacity-20" />
+                <img src={src} alt="" loading="lazy" className="h-full w-full object-cover" />
               </div>
             ))}
           </div>
+          <div aria-hidden="true" className="pointer-events-none absolute inset-0 bg-background/75" />
           <div aria-hidden="true" className="pointer-events-none absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-background" />
           <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
-            <p className="font-medium">Find something to watch</p>
-            <p className="mt-1 meta">Search movies and series to add to your list</p>
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute left-1/2 top-1/2 h-40 w-64 max-w-[85%] -translate-x-1/2 -translate-y-1/2 bg-[radial-gradient(ellipse_at_center,var(--background)_0%,transparent_70%)]"
+            />
+            <p className="relative font-medium">Find something to watch</p>
           </div>
         </div>
       ) : (
