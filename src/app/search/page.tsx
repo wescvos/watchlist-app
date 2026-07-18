@@ -342,7 +342,18 @@ export default function SearchPage() {
              recede by the same amount instead of the wall looking patchy.
              The bottom fade eases it into the page background, same
              technique family as the detail-page backdrop. */
-          <div className="relative min-h-[65vh] overflow-hidden fade-in">
+          <div
+            className="relative overflow-hidden fade-in"
+            // A fixed height (not min-height) is what actually makes
+            // overflow-hidden clip excess rows — min-height only sets a
+            // floor, so a grid taller than 65vh (common with 20 tiles at 4
+            // columns) grew past the viewport and made the whole page
+            // scrollable. This screen is meant to be a static "front door",
+            // so the wall is capped to exactly the space left below the
+            // fixed header and above <main>'s bottom padding; anything past
+            // that is clipped, not scrolled to.
+            style={{ height: `calc(100dvh - ${headerHeight}px - 6rem)` }}
+          >
             <div aria-hidden="true" className="grid grid-cols-4 gap-2 sm:grid-cols-6">
               {wallPosters.map((src, i) => (
                 <div key={i} className="aspect-[2/3] overflow-hidden rounded-md bg-gray-100 dark:bg-white/5">
