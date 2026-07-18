@@ -44,6 +44,8 @@ model Title {
   status    Status    @default(WANT)
   note      String?
   myRating  Int?
+  pinned    Boolean   @default(false)
+  pinnedAt  DateTime?
   addedAt   DateTime  @default(now())
   watchedAt DateTime?
 

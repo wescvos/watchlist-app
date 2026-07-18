@@ -58,11 +58,14 @@ export async function addTitle(
 
 export function listTitles(status?: Status): Promise<Title[]> {
   // Watched: most recently watched first (addedAt as tiebreaker).
-  // Want / unfiltered: most recently added first.
+  // Want / unfiltered: pinned first (most recently pinned on top), then the
+  // rest by most recently added. `pinned` is the primary key so pinnedAt's
+  // null ordering for unpinned rows never matters — they all fall through to
+  // addedAt.
   const orderBy =
     status === Status.WATCHED
       ? [{ watchedAt: "desc" as const }, { addedAt: "desc" as const }]
-      : { addedAt: "desc" as const };
+      : [{ pinned: "desc" as const }, { pinnedAt: "desc" as const }, { addedAt: "desc" as const }];
   return prisma.title.findMany({
     where: status ? { status } : undefined,
     orderBy,
@@ -75,14 +78,24 @@ export function getTitle(id: string): Promise<Title | null> {
 
 export async function updateTitle(
   id: string,
-  patch: { status?: Status; note?: string | null; myRating?: number | null },
+  patch: { status?: Status; note?: string | null; myRating?: number | null; pinned?: boolean },
 ): Promise<Title> {
   const data: Prisma.TitleUpdateInput = {};
   if (patch.note !== undefined) data.note = patch.note;
   if (patch.myRating !== undefined) data.myRating = patch.myRating;
+  if (patch.pinned !== undefined) {
+    data.pinned = patch.pinned;
+    data.pinnedAt = patch.pinned ? new Date() : null;
+  }
+  // Applied after the pinned branch so that a combined status→WATCHED wins:
+  // pinning is a want-list concept, so a watched title must never stay pinned.
   if (patch.status !== undefined) {
     data.status = patch.status;
     data.watchedAt = patch.status === Status.WATCHED ? new Date() : null;
+    if (patch.status === Status.WATCHED) {
+      data.pinned = false;
+      data.pinnedAt = null;
+    }
   }
   return prisma.title.update({ where: { id }, data });
 }

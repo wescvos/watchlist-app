@@ -12,7 +12,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   if (!body || typeof body !== "object") {
     return NextResponse.json({ error: "Invalid body" }, { status: 400 });
   }
-  const patch: { status?: Status; note?: string | null; myRating?: number | null } = {};
+  const patch: { status?: Status; note?: string | null; myRating?: number | null; pinned?: boolean } = {};
   if ("status" in body) {
     if (body.status !== "WANT" && body.status !== "WATCHED") {
       return NextResponse.json({ error: "status must be WANT or WATCHED" }, { status: 400 });
@@ -32,6 +32,12 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
       return NextResponse.json({ error: "myRating must be an integer 1-10 or null" }, { status: 400 });
     }
     patch.myRating = r;
+  }
+  if ("pinned" in body) {
+    if (typeof body.pinned !== "boolean") {
+      return NextResponse.json({ error: "pinned must be a boolean" }, { status: 400 });
+    }
+    patch.pinned = body.pinned;
   }
   try {
     return NextResponse.json(await updateTitle(id, patch));

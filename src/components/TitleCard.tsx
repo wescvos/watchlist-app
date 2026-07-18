@@ -10,6 +10,7 @@ export interface CardTitle {
   imdbScore: string | null;
   genres: string[];
   mediaType: MediaKind;
+  pinned: boolean;
 }
 
 export function TitleCard({ t, status }: { t: CardTitle; status: "WANT" | "WATCHED" }) {
@@ -25,7 +26,7 @@ export function TitleCard({ t, status }: { t: CardTitle; status: "WANT" | "WATCH
       href={`/title/${t.id}`}
       className="block rounded-lg transition-opacity active:opacity-90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground"
     >
-      <div className="aspect-[2/3] w-full overflow-hidden rounded-lg bg-gray-200 ring-1 ring-black/5 dark:bg-white/10 dark:ring-white/10">
+      <div className="relative aspect-[2/3] w-full overflow-hidden rounded-lg bg-gray-200 ring-1 ring-black/5 dark:bg-white/10 dark:ring-white/10">
         {t.posterUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={t.posterUrl} alt={t.title} className="h-full w-full object-cover" />
@@ -33,6 +34,9 @@ export function TitleCard({ t, status }: { t: CardTitle; status: "WANT" | "WATCH
           <div className="flex h-full items-center justify-center p-2 text-center meta">
             {t.title}
           </div>
+        )}
+        {t.pinned && (
+          <span className="absolute left-1 top-1 rounded bg-background/85 px-1 py-0.5 meta backdrop-blur-sm">Pinned</span>
         )}
       </div>
       <p className="mt-1 truncate text-sm font-medium">{t.title}</p>

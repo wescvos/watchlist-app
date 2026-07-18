@@ -15,7 +15,7 @@ interface Title {
   cast: CastMember[]; director: string | null;
   watchProviders: WatchProvider[]; watchLink: string | null;
   tmdbScore: number | null; imdbScore: string | null; rtScore: string | null; metacriticScore: string | null;
-  status: "WANT" | "WATCHED"; note: string | null; myRating: number | null;
+  status: "WANT" | "WATCHED"; note: string | null; myRating: number | null; pinned: boolean;
   fetchedAt: string; watchedAt: string | null;
 }
 
@@ -42,6 +42,7 @@ export function TitleDetail({ title }: { title: Title }) {
   const [status, setStatus] = useState(title.status);
   const [note, setNote] = useState(title.note ?? "");
   const [myRating, setMyRating] = useState<number | null>(title.myRating);
+  const [pinned, setPinned] = useState(title.pinned);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [flash, setFlash] = useState<"rating" | "note" | "refresh" | null>(null);
@@ -99,8 +100,19 @@ export function TitleDetail({ title }: { title: Title }) {
     const prev = status;
     const next = status === "WANT" ? "WATCHED" : "WANT";
     setStatus(next);
+    // Server clears pinned when a title becomes watched (pinning is want-only);
+    // mirror that locally so the state stays honest without a reload.
+    if (next === "WATCHED") setPinned(false);
     const ok = await patch({ status: next });
     if (!ok) setStatus(prev);
+  }
+
+  async function togglePin() {
+    const prev = pinned;
+    const next = !pinned;
+    setPinned(next);
+    const ok = await patch({ pinned: next });
+    if (!ok) setPinned(prev);
   }
 
   async function refresh() {
@@ -263,6 +275,16 @@ export function TitleDetail({ title }: { title: Title }) {
 
       {/* Actions */}
       <div className="mt-2 flex flex-wrap items-center gap-2">
+        {status === "WANT" && (
+          <button
+            onClick={togglePin}
+            disabled={saving}
+            aria-pressed={pinned}
+            className="rounded-lg border border-black/12 px-3 py-2 text-sm transition-colors hover:bg-gray-100 active:bg-gray-100 disabled:opacity-50 dark:border-white/15 dark:hover:bg-white/10 dark:active:bg-white/10"
+          >
+            {pinned ? "Unpin" : "Pin to top"}
+          </button>
+        )}
         <button
           onClick={toggleStatus}
           disabled={saving}

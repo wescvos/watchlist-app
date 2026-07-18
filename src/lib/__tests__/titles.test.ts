@@ -68,10 +68,38 @@ describe("updateTitle", () => {
     const arg = (prisma.title.update as any).mock.calls[0][0];
     expect(arg.data.watchedAt).toBeNull();
   });
-  it("updating only note does not touch status/myRating/watchedAt", async () => {
+  it("updating only note does not touch status/myRating/watchedAt/pinned", async () => {
     await updateTitle("id", { note: "hi" });
     const arg = (prisma.title.update as any).mock.calls[0][0];
     expect(arg.data).toEqual({ note: "hi" });
+  });
+  it("pinning sets pinned true and a pinnedAt date, touching nothing else", async () => {
+    await updateTitle("id", { pinned: true });
+    const arg = (prisma.title.update as any).mock.calls[0][0];
+    expect(arg.data.pinned).toBe(true);
+    expect(arg.data.pinnedAt).toBeInstanceOf(Date);
+    for (const k of ["status", "note", "myRating", "watchedAt"]) {
+      expect(k in arg.data).toBe(false);
+    }
+  });
+  it("unpinning sets pinned false and nulls pinnedAt", async () => {
+    await updateTitle("id", { pinned: false });
+    const arg = (prisma.title.update as any).mock.calls[0][0];
+    expect(arg.data.pinned).toBe(false);
+    expect(arg.data.pinnedAt).toBeNull();
+  });
+  it("marking WATCHED clears pinned/pinnedAt (pinning is want-only)", async () => {
+    await updateTitle("id", { status: Status.WATCHED });
+    const arg = (prisma.title.update as any).mock.calls[0][0];
+    expect(arg.data.status).toBe(Status.WATCHED);
+    expect(arg.data.pinned).toBe(false);
+    expect(arg.data.pinnedAt).toBeNull();
+  });
+  it("a combined pin + mark-WATCHED patch lets WATCHED win (title ends unpinned)", async () => {
+    await updateTitle("id", { pinned: true, status: Status.WATCHED });
+    const arg = (prisma.title.update as any).mock.calls[0][0];
+    expect(arg.data.pinned).toBe(false);
+    expect(arg.data.pinnedAt).toBeNull();
   });
 });
 
@@ -82,15 +110,15 @@ describe("listTitles ordering", () => {
     expect(arg.where).toEqual({ status: Status.WATCHED });
     expect(arg.orderBy).toEqual([{ watchedAt: "desc" }, { addedAt: "desc" }]);
   });
-  it("WANT sorts by addedAt desc", async () => {
+  it("WANT sorts pinned first (newest pin), then by addedAt desc", async () => {
     await listTitles(Status.WANT);
     const arg = (prisma.title.findMany as any).mock.calls[0][0];
-    expect(arg.orderBy).toEqual({ addedAt: "desc" });
+    expect(arg.orderBy).toEqual([{ pinned: "desc" }, { pinnedAt: "desc" }, { addedAt: "desc" }]);
   });
-  it("no filter returns all, addedAt desc", async () => {
+  it("no filter returns all with the same pinned-first ordering", async () => {
     await listTitles();
     const arg = (prisma.title.findMany as any).mock.calls[0][0];
     expect(arg.where).toBeUndefined();
-    expect(arg.orderBy).toEqual({ addedAt: "desc" });
+    expect(arg.orderBy).toEqual([{ pinned: "desc" }, { pinnedAt: "desc" }, { addedAt: "desc" }]);
   });
 });
