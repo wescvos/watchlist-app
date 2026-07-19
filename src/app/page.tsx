@@ -240,7 +240,7 @@ export default function Home() {
       )}
       {showSkeleton ? (
         <div className="mt-4 grid grid-cols-3 gap-3 sm:grid-cols-4" aria-hidden="true">
-          {[0, 1, 2, 3, 4, 5].map((i) => (
+          {[0, 1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
             <div key={i} className="aspect-[2/3] w-full animate-pulse rounded-lg bg-gray-200 motion-reduce:animate-none dark:bg-white/10" />
           ))}
         </div>
