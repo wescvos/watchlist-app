@@ -124,4 +124,4 @@ From `package.json`:
 | `npm run test:watch` | Run tests in watch mode |
 | `npm run lint` | Lint the codebase |
 
-`scripts/` also contains a few one-off utility scripts (Google Takeout library import, a bulk title-metadata refresh, icon generation). These are standalone, run manually via `npx tsx scripts/<name>.ts`, and aren't part of normal setup.
+`scripts/` also contains one-off utility scripts (a bulk title-metadata refresh, icon generation, and the Google Takeout import described above). These are standalone, run manually via `npx tsx scripts/<name>.ts`, and aren't part of normal setup.
