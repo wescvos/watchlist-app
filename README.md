@@ -62,6 +62,22 @@ Your database starts **empty**. This is a fresh, clean instance — there's no s
 2. Set all four environment variables (`DATABASE_URL`, `TMDB_API_KEY`, `OMDB_API_KEY`, `APP_PASSCODE`) for the Production environment — per the gotchas above.
 3. Deploy. The build script (`prisma generate && prisma migrate deploy && next build`) applies any pending migrations automatically on every deploy — no manual migration step needed.
 
+## Install as an app (iOS / Android)
+
+Once deployed, the app runs in the browser, but you can install it to your home screen so it behaves like a native app (full screen, its own icon, no browser chrome).
+
+**iPhone / iPad (Safari):**
+1. Open your deployed URL in **Safari** (this doesn't work from Chrome on iOS).
+2. Tap the **Share** button (the square with an arrow).
+3. Scroll down and tap **Add to Home Screen**.
+4. Confirm, and the icon appears on your home screen like any other app.
+
+**Android (Chrome):**
+1. Open your deployed URL in Chrome.
+2. Tap the **⋮** menu (top right).
+3. Tap **Add to Home screen** (or **Install app**).
+4. Confirm to install.
+
 ## Scripts
 
 From `package.json`:
