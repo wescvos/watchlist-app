@@ -1,6 +1,10 @@
 # Watchlist
 
-A personal movie & TV watchlist — search titles, track what you want to watch vs. what you've watched, pull in cast, streaming providers, and ratings (IMDb/RT/Metacritic via OMDb, everything else via TMDb). Built as an installable PWA with Next.js 16, Prisma, and Postgres.
+# Watchlist
+
+A personal movie & TV watchlist — think of it as a replacement for Google's "Watchlist" / "Want to watch" feature, but with the piece Google never gave you: a proper **Watched** list alongside your **Want to watch** list, so you can track not just what you're planning to see but everything you already have.
+
+Search any movie or series, add it to either list, and the app pulls in the cast, streaming availability, and ratings (IMDb/Rotten Tomatoes/Metacritic via OMDb, everything else via TMDb). Built as an installable PWA with Next.js 16, Prisma, and Postgres.
 
 ## Prerequisites
 
