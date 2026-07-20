@@ -74,3 +74,18 @@ From `package.json`:
 | `npm run lint` | Lint the codebase |
 
 `scripts/` also contains a few one-off utility scripts (Google Takeout library import, a bulk title-metadata refresh, icon generation). These are standalone, run manually via `npx tsx scripts/<name>.ts`, and aren't part of normal setup.
+
+## Screenshots
+
+<table>
+  <tr>
+    <td><img width="250" src="https://github.com/user-attachments/assets/70bdcce9-681c-4954-ae07-dd3da0aa5b70" /></td>
+    <td><img width="250" src="https://github.com/user-attachments/assets/3cae1bc8-3ec3-4bf7-bda5-b052f415e7d3" /></td>
+    <td><img width="250" src="https://github.com/user-attachments/assets/4687c0b7-d5dd-4e83-ab57-1aba009737da" /></td>
+  </tr>
+  <tr>
+    <td><img width="250" src="https://github.com/user-attachments/assets/8979b22c-9f09-4b9a-b87a-e14b6d79d2a0" /></td>
+    <td><img width="250" src="https://github.com/user-attachments/assets/0c47f20b-ea65-4f44-a672-96172b873f40" /></td>
+    <td><img width="250" src="https://github.com/user-attachments/assets/3eb06479-8802-45c4-a019-874e89ae64dd" /></td>
+  </tr>
+</table>
