@@ -78,6 +78,24 @@ Once deployed, the app runs in the browser, but you can install it to your home 
 3. Tap **Add to Home screen** (or **Install app**).
 4. Confirm to install.
 
+## Migrating from Google
+
+Already have a list in Google's "Want to watch"? You can bring it across.
+
+1. Export your data via [Google Takeout](https://takeout.google.com) — include **Saved** (your want-to-watch lists) and **Search Contributions** (your watched history).
+2. Drop the exported files into an `import/` folder at the project root (this folder is gitignored, so your personal data never gets committed).
+3. Run the import in preview mode first to see what will match:
+```bash
+   npx tsx scripts/import-google-takeout.ts
+```
+   This is a **dry run** by default — it reports which titles matched confidently against TMDb and which need review, and writes nothing to your database.
+4. When you're happy with the preview, run it again with `--commit` to actually import:
+```bash
+   npx tsx scripts/import-google-takeout.ts --commit
+```
+
+Titles from your watched history import as **Watched**; titles from your saved lists import as **Want to watch**. Anything that can't be matched confidently is skipped rather than guessed.
+
 ## Scripts
 
 From `package.json`:
