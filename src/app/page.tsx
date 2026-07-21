@@ -41,14 +41,72 @@ function UrlTypeSync({ onType }: { onType: (t: MediaKind | null) => void }) {
   return null;
 }
 
+// Same mechanism again, but for both lists at once: each list carries its own
+// sort param so Want and Watched remember their sort independently and both
+// survive a Home remount (Back from a title page) exactly like the filters do.
+// Default is omitted from the URL; only the "rating" state is written.
+function UrlSortSync({ onSort }: { onSort: (modes: Record<Status, SortMode>) => void }) {
+  const searchParams = useSearchParams();
+  const want = searchParams.get("wantSort");
+  const watched = searchParams.get("watchedSort");
+  useEffect(() => {
+    onSort({
+      WANT: want === "rating" ? "rating" : "default",
+      WATCHED: watched === "rating" ? "rating" : "default",
+    });
+  }, [want, watched, onSort]);
+  return null;
+}
+
 const STATUSES: Status[] = ["WANT", "WATCHED"];
-const SORT_CAPTION: Record<Status, string> = { WANT: "By date added", WATCHED: "By date watched" };
+
+// Each list has exactly two sort states: its date-based default (already the
+// order the API returns) and a rating-based one. "rating" means IMDb score for
+// Want, personal rating for Watched — the caption spells out which.
+type SortMode = "default" | "rating";
+const SORT_CAPTION: Record<Status, Record<SortMode, string>> = {
+  WANT: { default: "By date added", rating: "By IMDb rating" },
+  WATCHED: { default: "By date watched", rating: "By my rating" },
+};
+
+// imdbScore is stored as a string ("8.5", "N/A", …); anything non-numeric
+// reads as no rating so it sorts to the bottom rather than ranking as 0/high.
+function imdbNumber(t: CardTitle): number | null {
+  if (t.imdbScore == null) return null;
+  const n = parseFloat(t.imdbScore);
+  return Number.isFinite(n) ? n : null;
+}
+
+// Highest rating first; missing ratings always sink to the bottom. Returns 0
+// for equal keys so the caller's already-ordered array (date order from the
+// server) breaks ties via the engine's stable sort.
+function ratingDescNullsLast(a: number | null, b: number | null): number {
+  if (a === b) return 0;
+  if (a == null) return 1;
+  if (b == null) return -1;
+  return b - a;
+}
+
+// Pinned-first grouping must survive the rating sort exactly as it does the
+// date sort: pinned titles stay grouped on top (ordered by IMDb among
+// themselves), unpinned below (same), never interleaved by score.
+function sortWantByRating(titles: CardTitle[]): CardTitle[] {
+  return titles.slice().sort((a, b) => {
+    if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+    return ratingDescNullsLast(imdbNumber(a), imdbNumber(b));
+  });
+}
+
+function sortWatchedByRating(titles: CardTitle[]): CardTitle[] {
+  return titles.slice().sort((a, b) => ratingDescNullsLast(a.myRating, b.myRating));
+}
 
 export default function Home() {
   const [status, setStatus] = useState<Status>("WANT");
   const [reloadToken, setReloadToken] = useState(0);
   const [genreFilter, setGenreFilterState] = useState<string | null>(null);
   const [typeFilter, setTypeFilterState] = useState<MediaKind | null>(null);
+  const [sortModes, setSortModes] = useState<Record<Status, SortMode>>({ WANT: "default", WATCHED: "default" });
   const [lists, setListsState] = useState<Record<Status, ListState>>(() => listCache);
   const setLists = useCallback((updater: (prev: Record<Status, ListState>) => Record<Status, ListState>) => {
     setListsState((prev) => {
@@ -64,30 +122,41 @@ export default function Home() {
   // URL, not just component state, so Back from a title detail page restores
   // all three instead of resetting — same fix as the scroll-position issue,
   // same mechanism.
-  function buildUrl(s: Status, genre: string | null, type: MediaKind | null): string {
+  function buildUrl(s: Status, genre: string | null, type: MediaKind | null, sorts: Record<Status, SortMode>): string {
     const params = new URLSearchParams();
     if (s !== "WANT") params.set("status", s);
     if (s === "WANT" && genre) params.set("genre", genre);
     if (s === "WANT" && type) params.set("type", type);
+    // Both lists' sorts are always carried (not just the active one), so
+    // switching tabs never drops the other list's remembered sort from the URL.
+    if (sorts.WANT === "rating") params.set("wantSort", "rating");
+    if (sorts.WATCHED === "rating") params.set("watchedSort", "rating");
     const qs = params.toString();
     return qs ? `/?${qs}` : "/";
   }
 
   function changeStatus(next: Status) {
     setStatus(next);
-    router.replace(buildUrl(next, genreFilter, typeFilter), { scroll: false });
+    router.replace(buildUrl(next, genreFilter, typeFilter, sortModes), { scroll: false });
   }
   function changeGenre(next: string | null) {
     setGenreFilterState(next);
-    router.replace(buildUrl(status, next, typeFilter), { scroll: false });
+    router.replace(buildUrl(status, next, typeFilter, sortModes), { scroll: false });
   }
   function changeType(next: MediaKind | null) {
     setTypeFilterState(next);
-    router.replace(buildUrl(status, genreFilter, next), { scroll: false });
+    router.replace(buildUrl(status, genreFilter, next, sortModes), { scroll: false });
+  }
+  function toggleSort() {
+    const next: SortMode = sortModes[status] === "default" ? "rating" : "default";
+    const nextModes = { ...sortModes, [status]: next };
+    setSortModes(nextModes);
+    router.replace(buildUrl(status, genreFilter, typeFilter, nextModes), { scroll: false });
   }
   const handleUrlStatus = useCallback((s: Status) => setStatus(s), []);
   const handleUrlGenre = useCallback((g: string | null) => setGenreFilterState(g), []);
   const handleUrlType = useCallback((t: MediaKind | null) => setTypeFilterState(t), []);
+  const handleUrlSort = useCallback((modes: Record<Status, SortMode>) => setSortModes(modes), []);
 
   const load = useCallback((target: Status) => {
     let ignore = false;
@@ -151,9 +220,18 @@ export default function Home() {
   const activeGenre = status === "WANT" && genreFilter && wantGenres.includes(genreFilter) ? genreFilter : null;
   const activeType = status === "WANT" ? typeFilter : null;
   const showFilterRow = status === "WANT" && !showSkeleton && !showError && !showEmpty;
-  const displayTitles = current.titles.filter(
+  const filteredTitles = current.titles.filter(
     (t) => (!activeGenre || t.genres.includes(activeGenre)) && (!activeType || t.mediaType === activeType),
   );
+  // Default mode keeps the server order as-is (date-based, pinned-first for
+  // Want); only the rating mode re-sorts, per list.
+  const sortMode = sortModes[status];
+  const displayTitles =
+    sortMode === "default"
+      ? filteredTitles
+      : status === "WANT"
+      ? sortWantByRating(filteredTitles)
+      : sortWatchedByRating(filteredTitles);
   const showFilteredEmpty = !showSkeleton && !showError && !showEmpty && displayTitles.length === 0;
   const typeLabel = (t: MediaKind) => (t === "MOVIE" ? "movies" : "series");
   const filteredEmptyMessage = activeType && activeGenre
@@ -183,6 +261,9 @@ export default function Home() {
       <Suspense fallback={null}>
         <UrlTypeSync onType={handleUrlType} />
       </Suspense>
+      <Suspense fallback={null}>
+        <UrlSortSync onSort={handleUrlSort} />
+      </Suspense>
       <div className="mb-4 flex items-center justify-between">
         <h1 className="text-lg font-semibold">Watchlist</h1>
         <Link
@@ -194,7 +275,21 @@ export default function Home() {
       </div>
       <ListToggle value={status} onChange={changeStatus} counts={counts} />
       {!showSkeleton && !showError && !showEmpty && (
-        <p className="mt-4 meta">{SORT_CAPTION[status]}</p>
+        // The sort caption doubles as the control — tapping it cycles this
+        // list's two sort modes. min-h-11 gives a real ~44px tap target
+        // around the small text; the negative margin keeps it from adding
+        // that full height to the layout, so it sits where the caption did.
+        <button
+          type="button"
+          onClick={toggleSort}
+          aria-label={`Sort: ${SORT_CAPTION[status][sortMode]}. Tap to change.`}
+          className="mt-2 -mb-2 inline-flex min-h-11 items-center gap-1 rounded meta transition-colors hover:text-foreground active:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground"
+        >
+          <span>{SORT_CAPTION[status][sortMode]}</span>
+          <svg viewBox="0 0 24 24" className="h-3 w-3 opacity-60" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M6 9l6 6 6-6" />
+          </svg>
+        </button>
       )}
       {showFilterRow && (
         <div className="-mx-4 mt-3 flex gap-1.5 overflow-x-auto scrollbar-hide px-4 pb-1 [-webkit-overflow-scrolling:touch]">
