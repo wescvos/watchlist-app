@@ -266,12 +266,23 @@ export default function Home() {
       </Suspense>
       <div className="mb-4 flex items-center justify-between">
         <h1 className="text-lg font-semibold">Watchlist</h1>
-        <Link
-          href="/search"
-          className="rounded-lg bg-foreground px-3 py-2 text-sm text-background transition-opacity hover:opacity-90 active:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-        >
-          + Add
-        </Link>
+        <div className="flex items-center gap-1.5">
+          {/* Secondary entry ("For You"): subdued ghost styling so the solid
+              "+ Add" pill stays the primary action. An action, not a list tab.
+              Route stays /recommended; only the label is short. */}
+          <Link
+            href="/recommended"
+            className="rounded-lg px-3 py-2 text-sm font-medium text-gray-500 transition-colors hover:bg-gray-100 hover:text-foreground active:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground dark:hover:bg-white/10 dark:active:bg-white/10"
+          >
+            For You
+          </Link>
+          <Link
+            href="/search"
+            className="rounded-lg bg-foreground px-3 py-2 text-sm text-background transition-opacity hover:opacity-90 active:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+          >
+            + Add
+          </Link>
+        </div>
       </div>
       <ListToggle value={status} onChange={changeStatus} counts={counts} />
       {!showSkeleton && !showError && !showEmpty && (
