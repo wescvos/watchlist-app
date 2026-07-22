@@ -1,7 +1,6 @@
 import { getProvider } from "./provider";
-import { RecommendationError } from "./gemini";
 import type { RatedTitle, RawSuggestion, ResolvedSuggestion } from "./types";
-import { saveRecommendationSet } from "@/lib/recommendations";
+import { saveRecommendationSet, getDismissedKeySet } from "@/lib/recommendations";
 import { evaluateMatch } from "@/lib/tmdbMatch";
 import { searchTitles } from "@/lib/tmdb";
 import { prisma } from "@/lib/prisma";
@@ -48,22 +47,15 @@ function yearMatches(wanted: number | null, actual: number | null): boolean {
   return Math.abs(actual - wanted) <= 1;
 }
 
-export interface ResolveOutcome {
-  resolved: ResolvedSuggestion[];
-  // How many raw suggestions matched a real TMDb title, BEFORE the library
-  // filter. Distinguishes "the model produced usable titles" from "the model
-  // produced nothing that resolves" (see generateRecommendations).
-  matchedCount: number;
-}
-
 // Turn blind LLM titles into real, linkable, genuinely-new suggestions. Reuses
 // the shared TMDb matcher (evaluateMatch / pickDominantCandidate) with the
 // LLM's mediaType + year as strong pre-filters, DROPS anything ambiguous or
-// with no dominant match rather than guessing, and dedupes within the batch.
-export async function resolveSuggestions(raw: RawSuggestion[]): Promise<ResolveOutcome> {
+// with no dominant match rather than guessing, dedupes, and excludes anything
+// already on a list (Want/Watched) or permanently dismissed.
+export async function resolveSuggestions(raw: RawSuggestion[]): Promise<ResolvedSuggestion[]> {
   const resolved: ResolvedSuggestion[] = [];
   const seen = new Set<string>();
-  let matchedCount = 0;
+  const dismissed = await getDismissedKeySet();
 
   for (const s of raw) {
     const results = await searchTitles(s.title);
@@ -74,11 +66,10 @@ export async function resolveSuggestions(raw: RawSuggestion[]): Promise<ResolveO
     if (match.outcome === "review" || !match.candidate) continue;
 
     const c = match.candidate;
-    matchedCount++;
-
     const key = `${c.mediaType}:${c.tmdbId}`;
     if (seen.has(key)) continue; // two suggestions resolved to the same title
     seen.add(key);
+    if (dismissed.has(key)) continue; // permanently "not interested"
 
     const existing = await prisma.title.findUnique({
       where: { tmdbId_mediaType: { tmdbId: c.tmdbId, mediaType: c.mediaType } },
@@ -96,11 +87,14 @@ export async function resolveSuggestions(raw: RawSuggestion[]): Promise<ResolveO
     });
   }
 
-  return { resolved, matchedCount };
+  return resolved;
 }
 
-// Build history → provider → resolve → persist. Throws RecommendationError on
-// provider failure/timeout (propagated) and when nothing resolves at all.
+// Build history → provider → resolve → persist. The provider throws (→ the
+// route maps 429/timeout/malformed) only on GENUINE failures. Running out of
+// new titles is NOT a failure: if the model responded fine but nothing new
+// survives filtering (all on-list/watched/dismissed, or nothing resolved), we
+// save that empty set so the screen shows "nothing new to suggest".
 export async function generateRecommendations(): Promise<GenerateResult> {
   const history = await buildRatedHistory();
   // Empty history is a valid state, not an error: the caller returns 200
@@ -109,15 +103,7 @@ export async function generateRecommendations(): Promise<GenerateResult> {
 
   const provider = getProvider();
   const raw = await provider.recommend({ history });
-
-  const { resolved, matchedCount } = await resolveSuggestions(raw);
-  // Nothing resolved to a real TMDb title at all → the model's output was
-  // unusable; treat as a failure (route → 502). But if titles DID resolve and
-  // were merely all already in the library, that's a valid (possibly empty)
-  // set: save it so the screen can show "nothing new" rather than an error.
-  if (matchedCount === 0) {
-    throw new RecommendationError("No suggestions resolved to a TMDb match");
-  }
+  const resolved = await resolveSuggestions(raw);
 
   const set = await saveRecommendationSet({
     suggestions: resolved,

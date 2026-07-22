@@ -64,4 +64,11 @@ describe("POST /api/recommendations", () => {
     const res = await POST();
     expect(res.status).toBe(504);
   });
+
+  it("maps a rate-limit (429) to a distinct 429 with an honest message", async () => {
+    generate.mockRejectedValue(new RecommendationError("rate limited", "rate_limit"));
+    const res = await POST();
+    expect(res.status).toBe(429);
+    expect((await res.json()).error).toMatch(/today's recommendation limit/i);
+  });
 });

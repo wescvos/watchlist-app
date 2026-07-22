@@ -77,6 +77,9 @@ export default function RecommendedPage() {
           setEmptyHistory(false);
           setSet(data as RecSet);
         }
+      } else if (res.status === 429) {
+        // Free-tier daily cap — be honest rather than generic. Keeps the set.
+        setMessage("You've reached today's recommendation limit. Try again tomorrow.");
       } else {
         // Non-2xx (502/504): keep whatever set is already showing.
         setMessage("Couldn't refresh recommendations. Showing your last set.");
@@ -86,6 +89,23 @@ export default function RecommendedPage() {
     } finally {
       setGenerating(false);
     }
+  }, []);
+
+  // Record a permanent "not interested" and remove the card optimistically; the
+  // dismissal also excludes it from all future generations server-side.
+  const dismiss = useCallback((s: ResolvedSuggestion) => {
+    setSet((prev) =>
+      prev
+        ? { ...prev, suggestions: prev.suggestions.filter((x) => !(x.tmdbId === s.tmdbId && x.mediaType === s.mediaType)) }
+        : prev,
+    );
+    void fetch("/api/recommendations/dismiss", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ tmdbId: s.tmdbId, mediaType: s.mediaType }),
+    }).catch(() => {
+      // Optimistic: if the write fails it simply reappears on the next generate.
+    });
   }, []);
 
   const suggestions = set?.suggestions ?? [];
@@ -125,7 +145,7 @@ export default function RecommendedPage() {
       ) : hasPopulatedSet ? (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 fade-in">
           {suggestions.map((s) => (
-            <SuggestionCard key={`${s.mediaType}-${s.tmdbId}`} s={s} />
+            <SuggestionCard key={`${s.mediaType}-${s.tmdbId}`} s={s} onDismiss={dismiss} />
           ))}
         </div>
       ) : generating ? (

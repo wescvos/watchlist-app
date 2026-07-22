@@ -73,4 +73,42 @@ describe("Recommended screen", () => {
     expect(screen.queryByText(/Showing your last set/i)).not.toBeInTheDocument();
     expect(screen.queryByRole("img")).not.toBeInTheDocument();
   });
+
+  it("shows a distinct rate-limit message on a 429 and keeps the cached set", async () => {
+    installFetch({
+      get: { ok: true, body: recSet([suggestion(10, "Sicario")]) },
+      post: { ok: false, status: 429, body: { error: "limit" } },
+    });
+    render(<RecommendedPage />);
+    await screen.findByText("Sicario");
+
+    fireEvent.click(screen.getByRole("button", { name: /refresh/i }));
+
+    await waitFor(() => expect(screen.getByText(/today's recommendation limit/i)).toBeInTheDocument());
+    expect(screen.queryByText(/Showing your last set/i)).not.toBeInTheDocument();
+    expect(screen.getByText("Sicario")).toBeInTheDocument();
+  });
+
+  it("dismisses a card: removes it optimistically and POSTs the dismissal", async () => {
+    const fetchMock = installFetch({
+      get: { ok: true, body: recSet([suggestion(10, "Sicario"), suggestion(20, "Fargo", "TV")]) },
+      post: { ok: true, body: { ok: true } },
+    });
+    render(<RecommendedPage />);
+    await screen.findByText("Sicario");
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /not interested in Sicario/i }));
+    });
+
+    // Card gone from view…
+    expect(screen.queryByText("Sicario")).not.toBeInTheDocument();
+    expect(screen.getByText("Fargo")).toBeInTheDocument();
+    // …and the dismissal was recorded with the right key.
+    const dismissCall = fetchMock.mock.calls.find(
+      ([url, init]) => String(url).endsWith("/dismiss") && (init as { method?: string })?.method === "POST",
+    );
+    expect(dismissCall).toBeTruthy();
+    expect(JSON.parse(String((dismissCall![1] as { body?: unknown }).body))).toEqual({ tmdbId: 10, mediaType: "MOVIE" });
+  });
 });

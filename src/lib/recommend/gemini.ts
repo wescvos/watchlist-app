@@ -33,10 +33,11 @@ const MAX_OUTPUT_TOKENS = 8192;
 const TARGET_COUNT = 12;
 const REASON_MAX_LEN = 200;
 
-// Thrown for every failure mode (non-200, network, timeout, empty/invalid
-// output). The `kind` discriminator lets the API route map a timeout to 504
-// and everything else to 502 without string-matching the message.
-export type RecommendationErrorKind = "timeout" | "failure";
+// Thrown for genuine failures (non-200, network, timeout, no-text, malformed
+// JSON). A well-formed but empty result is NOT thrown — it's graceful
+// exhaustion. The `kind` discriminator lets the API route map rate-limit → 429
+// and timeout → 504 without string-matching the message.
+export type RecommendationErrorKind = "timeout" | "rate_limit" | "failure";
 
 export class RecommendationError extends Error {
   readonly kind: RecommendationErrorKind;
@@ -133,19 +134,14 @@ function coerceSuggestion(item: unknown): RawSuggestion | null {
   return { title, year, mediaType, reason };
 }
 
-// Drop-invalid-but-keep-valid: malformed entries are skipped, not fatal; a
-// completely unparseable body yields [] (the caller treats zero valid entries
-// as a failure). responseSchema makes malformed output rare, not impossible.
-export function parseSuggestions(text: string): RawSuggestion[] {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    return [];
-  }
-  if (!Array.isArray(parsed)) return [];
+// Drop-invalid-but-keep-valid: malformed ENTRIES are skipped, not fatal. An
+// empty result (all entries invalid, or a genuinely empty array) is returned
+// as [] — the service treats "nothing to recommend" as graceful exhaustion,
+// not a failure. Parsing the array itself (malformed/truncated JSON) is handled
+// by the caller, which treats that as a genuine failure.
+export function coerceSuggestions(items: unknown[]): RawSuggestion[] {
   const out: RawSuggestion[] = [];
-  for (const item of parsed) {
+  for (const item of items) {
     const s = coerceSuggestion(item);
     if (s) out.push(s);
   }
@@ -194,29 +190,41 @@ export class GeminiRecommendationProvider implements RecommendationProvider {
     if (!res.ok) {
       // Log Gemini's error body server-side — it names the real cause (invalid
       // key, model not found/retired, quota, bad schema) that the client's
-      // generic 502 hides. Never logs the key. (A retired model id here is
+      // generic status hides. Never logs the key. (A retired model id here is
       // exactly what this once masked.)
       const errorBody = await res.text().catch(() => "<unreadable>");
       console.error(`[recommend] Gemini non-200 status=${res.status} body=${errorBody.slice(0, 1200)}`);
+      // 429 is the free-tier daily/minute cap — tagged so the screen can show
+      // an honest "try again tomorrow" instead of a generic error.
+      if (res.status === 429) throw new RecommendationError("Gemini rate limit reached", "rate_limit");
       throw new RecommendationError(`Gemini returned ${res.status}`);
     }
 
     const data = await res.json().catch(() => null);
     const text = extractText(data);
-    // Concise, permanent breadcrumb on the empty-output paths: finishReason +
-    // token usage is exactly what catches a recurrence of thinking-token
-    // starvation (MAX_TOKENS with thoughts high, candidates truncated). No
-    // content, key, or history logged.
+    // Concise, permanent breadcrumb on the empty-output/failure paths:
+    // finishReason + token usage is exactly what catches a recurrence of
+    // thinking-token starvation (MAX_TOKENS, thoughts high, candidates
+    // truncated). No content, key, or history logged.
     if (text == null) {
       console.error(`[recommend] no text part: finishReason=${getFinishReason(data)} usage=${summarizeUsage(data)}`);
       throw new RecommendationError("Gemini response had no text part");
     }
 
-    const suggestions = parseSuggestions(text);
-    if (suggestions.length === 0) {
-      console.error(`[recommend] zero valid suggestions: finishReason=${getFinishReason(data)} usage=${summarizeUsage(data)}`);
-      throw new RecommendationError("Gemini returned no valid suggestions");
+    // A parseable array (even empty / all-invalid) is a fine response — the
+    // service treats "nothing new" as exhaustion, not an error. Only genuinely
+    // malformed or truncated JSON is a failure.
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      console.error(`[recommend] malformed JSON: finishReason=${getFinishReason(data)} usage=${summarizeUsage(data)}`);
+      throw new RecommendationError("Gemini returned malformed JSON");
     }
-    return suggestions;
+    if (!Array.isArray(parsed)) {
+      console.error(`[recommend] non-array response: finishReason=${getFinishReason(data)} usage=${summarizeUsage(data)}`);
+      throw new RecommendationError("Gemini response was not a JSON array");
+    }
+    return coerceSuggestions(parsed);
   }
 }

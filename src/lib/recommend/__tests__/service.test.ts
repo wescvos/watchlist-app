@@ -4,12 +4,12 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // dominance/drop discipline; mock only the IO boundaries.
 vi.mock("@/lib/tmdb", () => ({ searchTitles: vi.fn() }));
 vi.mock("@/lib/prisma", () => ({ prisma: { title: { findMany: vi.fn(), findUnique: vi.fn() } } }));
-vi.mock("@/lib/recommendations", () => ({ saveRecommendationSet: vi.fn() }));
+vi.mock("@/lib/recommendations", () => ({ saveRecommendationSet: vi.fn(), getDismissedKeySet: vi.fn() }));
 vi.mock("@/lib/recommend/provider", () => ({ getProvider: vi.fn() }));
 
 import { searchTitles } from "@/lib/tmdb";
 import { prisma } from "@/lib/prisma";
-import { saveRecommendationSet } from "@/lib/recommendations";
+import { saveRecommendationSet, getDismissedKeySet } from "@/lib/recommendations";
 import { getProvider } from "@/lib/recommend/provider";
 import {
   buildRatedHistory,
@@ -24,6 +24,7 @@ const searchMock = vi.mocked(searchTitles);
 const findMany = vi.mocked(prisma.title.findMany);
 const findUnique = vi.mocked(prisma.title.findUnique);
 const saveMock = vi.mocked(saveRecommendationSet);
+const dismissedMock = vi.mocked(getDismissedKeySet);
 const getProviderMock = vi.mocked(getProvider);
 
 function sr(o: Partial<SearchResult> & { tmdbId: number; title: string; mediaType: MediaKind }): SearchResult {
@@ -35,18 +36,21 @@ function raw(o: Partial<RawSuggestion> & { title: string; mediaType: MediaKind }
 function fakeProvider(recommend: RecommendationProvider["recommend"]): RecommendationProvider {
   return { model: "gemini-2.5-flash", recommend };
 }
+function watchedRow() {
+  return [{ title: "Whiplash", year: 2014, mediaType: "MOVIE", myRating: 9 }] as unknown as Awaited<
+    ReturnType<typeof prisma.title.findMany>
+  >;
+}
 
 beforeEach(() => {
   vi.clearAllMocks();
-  // Default: nothing already in the library.
-  findUnique.mockResolvedValue(null);
+  findUnique.mockResolvedValue(null); // nothing already in the library
+  dismissedMock.mockResolvedValue(new Set()); // nothing dismissed
 });
 
 describe("buildRatedHistory", () => {
   it("selects only watched + rated titles and maps to the whitelist", async () => {
-    findMany.mockResolvedValue([
-      { title: "Whiplash", year: 2014, mediaType: "MOVIE", myRating: 9 },
-    ] as unknown as Awaited<ReturnType<typeof prisma.title.findMany>>);
+    findMany.mockResolvedValue(watchedRow());
     const out = await buildRatedHistory();
     const arg = findMany.mock.calls[0][0];
     expect(arg?.where).toEqual({ status: "WATCHED", myRating: { not: null } });
@@ -60,8 +64,7 @@ describe("buildRatedHistory", () => {
 describe("resolveSuggestions", () => {
   it("resolves a single confident match to a linkable suggestion", async () => {
     searchMock.mockResolvedValueOnce([sr({ tmdbId: 10, title: "Sicario", mediaType: "MOVIE", year: 2015, posterUrl: "p" })]);
-    const { resolved, matchedCount } = await resolveSuggestions([raw({ title: "Sicario", year: 2015, mediaType: "MOVIE", reason: "tense" })]);
-    expect(matchedCount).toBe(1);
+    const resolved = await resolveSuggestions([raw({ title: "Sicario", year: 2015, mediaType: "MOVIE", reason: "tense" })]);
     expect(resolved).toEqual([
       { tmdbId: 10, mediaType: "MOVIE", title: "Sicario", year: 2015, posterUrl: "p", reason: "tense" },
     ]);
@@ -73,7 +76,7 @@ describe("resolveSuggestions", () => {
       sr({ tmdbId: 1, title: "Fargo", mediaType: "MOVIE", year: 1996, voteCount: 8000, popularity: 40 }),
       sr({ tmdbId: 2, title: "Fargo", mediaType: "TV", year: 2014, voteCount: 3000, popularity: 30 }),
     ]);
-    const { resolved } = await resolveSuggestions([raw({ title: "Fargo", year: 2014, mediaType: "TV" })]);
+    const resolved = await resolveSuggestions([raw({ title: "Fargo", year: 2014, mediaType: "TV" })]);
     expect(resolved.map((r) => r.tmdbId)).toEqual([2]);
   });
 
@@ -82,23 +85,30 @@ describe("resolveSuggestions", () => {
       sr({ tmdbId: 3, title: "The Office", mediaType: "TV", year: 2005, voteCount: 4000, popularity: 30 }),
       sr({ tmdbId: 4, title: "The Office", mediaType: "TV", year: 2001, voteCount: 3500, popularity: 28 }),
     ]);
-    const { resolved, matchedCount } = await resolveSuggestions([raw({ title: "The Office", year: null, mediaType: "TV" })]);
-    expect(matchedCount).toBe(0);
+    const resolved = await resolveSuggestions([raw({ title: "The Office", year: null, mediaType: "TV" })]);
     expect(resolved).toEqual([]);
   });
 
-  it("drops a suggestion already in the library (but counts it as matched)", async () => {
+  it("drops a suggestion already in the library", async () => {
     searchMock.mockResolvedValueOnce([sr({ tmdbId: 10, title: "Sicario", mediaType: "MOVIE", year: 2015 })]);
     findUnique.mockResolvedValueOnce({ id: "existing" } as unknown as Awaited<ReturnType<typeof prisma.title.findUnique>>);
-    const { resolved, matchedCount } = await resolveSuggestions([raw({ title: "Sicario", year: 2015, mediaType: "MOVIE" })]);
-    expect(matchedCount).toBe(1);
+    const resolved = await resolveSuggestions([raw({ title: "Sicario", year: 2015, mediaType: "MOVIE" })]);
     expect(resolved).toEqual([]);
+  });
+
+  it("drops a suggestion that has been dismissed", async () => {
+    dismissedMock.mockResolvedValue(new Set(["MOVIE:10"]));
+    searchMock.mockResolvedValueOnce([sr({ tmdbId: 10, title: "Sicario", mediaType: "MOVIE", year: 2015 })]);
+    const resolved = await resolveSuggestions([raw({ title: "Sicario", year: 2015, mediaType: "MOVIE" })]);
+    expect(resolved).toEqual([]);
+    // Dismissed short-circuits before the library lookup.
+    expect(findUnique).not.toHaveBeenCalled();
   });
 
   it("dedupes two suggestions that resolve to the same title", async () => {
     const hit = [sr({ tmdbId: 10, title: "Sicario", mediaType: "MOVIE", year: 2015 })];
     searchMock.mockResolvedValueOnce(hit).mockResolvedValueOnce(hit);
-    const { resolved } = await resolveSuggestions([
+    const resolved = await resolveSuggestions([
       raw({ title: "Sicario", year: 2015, mediaType: "MOVIE" }),
       raw({ title: "Sicario", year: 2015, mediaType: "MOVIE" }),
     ]);
@@ -115,9 +125,7 @@ describe("generateRecommendations", () => {
   });
 
   it("saves and returns a set on success", async () => {
-    findMany.mockResolvedValue([
-      { title: "Whiplash", year: 2014, mediaType: "MOVIE", myRating: 9 },
-    ] as unknown as Awaited<ReturnType<typeof prisma.title.findMany>>);
+    findMany.mockResolvedValue(watchedRow());
     getProviderMock.mockReturnValue(fakeProvider(vi.fn().mockResolvedValue([raw({ title: "Sicario", year: 2015, mediaType: "MOVIE", reason: "tense" })])));
     searchMock.mockResolvedValueOnce([sr({ tmdbId: 10, title: "Sicario", mediaType: "MOVIE", year: 2015, posterUrl: "p" })]);
     saveMock.mockResolvedValue({ id: "set1" } as unknown as Awaited<ReturnType<typeof saveRecommendationSet>>);
@@ -130,20 +138,8 @@ describe("generateRecommendations", () => {
     expect(out).toEqual({ empty: false, set: { id: "set1" } });
   });
 
-  it("throws when nothing resolves to a TMDb match (unusable model output)", async () => {
-    findMany.mockResolvedValue([
-      { title: "Whiplash", year: 2014, mediaType: "MOVIE", myRating: 9 },
-    ] as unknown as Awaited<ReturnType<typeof prisma.title.findMany>>);
-    getProviderMock.mockReturnValue(fakeProvider(vi.fn().mockResolvedValue([raw({ title: "Nonexistent Film", mediaType: "MOVIE" })])));
-    searchMock.mockResolvedValueOnce([]); // no TMDb results → dropped
-    await expect(generateRecommendations()).rejects.toBeInstanceOf(RecommendationError);
-    expect(saveMock).not.toHaveBeenCalled();
-  });
-
-  it("saves a valid empty set when everything resolved was already in the library", async () => {
-    findMany.mockResolvedValue([
-      { title: "Whiplash", year: 2014, mediaType: "MOVIE", myRating: 9 },
-    ] as unknown as Awaited<ReturnType<typeof prisma.title.findMany>>);
+  it("exhaustion is not an error: saves an empty set when nothing new survives filtering", async () => {
+    findMany.mockResolvedValue(watchedRow());
     getProviderMock.mockReturnValue(fakeProvider(vi.fn().mockResolvedValue([raw({ title: "Sicario", year: 2015, mediaType: "MOVIE" })])));
     searchMock.mockResolvedValueOnce([sr({ tmdbId: 10, title: "Sicario", mediaType: "MOVIE", year: 2015 })]);
     findUnique.mockResolvedValueOnce({ id: "existing" } as unknown as Awaited<ReturnType<typeof prisma.title.findUnique>>);
@@ -154,11 +150,21 @@ describe("generateRecommendations", () => {
     expect(out.empty).toBe(false);
   });
 
-  it("propagates a provider error (e.g. failure/timeout) to the caller", async () => {
-    findMany.mockResolvedValue([
-      { title: "Whiplash", year: 2014, mediaType: "MOVIE", myRating: 9 },
-    ] as unknown as Awaited<ReturnType<typeof prisma.title.findMany>>);
-    getProviderMock.mockReturnValue(fakeProvider(vi.fn().mockRejectedValue(new RecommendationError("boom", "timeout"))));
+  it("exhaustion is not an error: saves an empty set when nothing resolves to TMDb", async () => {
+    findMany.mockResolvedValue(watchedRow());
+    getProviderMock.mockReturnValue(fakeProvider(vi.fn().mockResolvedValue([raw({ title: "Nonexistent Film", mediaType: "MOVIE" })])));
+    searchMock.mockResolvedValueOnce([]); // no TMDb match → dropped, but not a failure
+    saveMock.mockResolvedValue({ id: "set-empty" } as unknown as Awaited<ReturnType<typeof saveRecommendationSet>>);
+
+    const out = await generateRecommendations();
+    expect(saveMock.mock.calls[0][0].suggestions).toEqual([]);
+    expect(out.empty).toBe(false);
+  });
+
+  it("propagates a genuine provider error (rate limit / timeout / malformed) to the caller", async () => {
+    findMany.mockResolvedValue(watchedRow());
+    getProviderMock.mockReturnValue(fakeProvider(vi.fn().mockRejectedValue(new RecommendationError("boom", "rate_limit"))));
     await expect(generateRecommendations()).rejects.toBeInstanceOf(RecommendationError);
+    expect(saveMock).not.toHaveBeenCalled();
   });
 });

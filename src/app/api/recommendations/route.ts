@@ -24,6 +24,12 @@ export async function POST() {
       "[api/recommendations] POST failed:",
       e instanceof RecommendationError ? `${e.name}(${e.kind}): ${e.message}` : e,
     );
+    if (e instanceof RecommendationError && e.kind === "rate_limit") {
+      return NextResponse.json(
+        { error: "You've reached today's recommendation limit. Try again tomorrow." },
+        { status: 429 },
+      );
+    }
     if (e instanceof RecommendationError && e.kind === "timeout") {
       return NextResponse.json({ error: "Recommendations timed out. Try again." }, { status: 504 });
     }
