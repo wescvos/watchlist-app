@@ -6,13 +6,17 @@ import type {
   RecommendationProvider,
 } from "./types";
 
-// Confirmed 2026-07-22 against ai.google.dev: gemini-2.5-flash is free-tier
-// eligible and served from the classic `generateContent` endpoint (the same
-// endpoint across tiers). Structured output uses generationConfig's
-// responseMimeType + responseSchema; the JSON lands at
+// gemini-2.5-flash was retired for NEW API keys (404 "no longer available to
+// new users"), so we use the rolling `-latest` alias, which always resolves to
+// the current stable flash model and won't go stale the same way. Verified
+// 2026-07-22 against this key: 200, finishReason STOP, valid JSON array.
+// Served from the classic `generateContent` endpoint; structured output uses
+// generationConfig's responseMimeType + responseSchema, JSON at
 // candidates[0].content.parts[0].text. (The newer Interactions API with
-// `responseFormat` is a separate Gemini-3 surface we deliberately do not use.)
-export const GEMINI_MODEL = "gemini-2.5-flash";
+// `responseFormat` is a separate surface we deliberately do not use.)
+// To pin a concrete version instead of the alias, gemini-3.5-flash is verified
+// working with the same request shape.
+export const GEMINI_MODEL = "gemini-flash-latest";
 
 const ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;
 
@@ -166,7 +170,15 @@ export class GeminiRecommendationProvider implements RecommendationProvider {
       clearTimeout(timer);
     }
 
-    if (!res.ok) throw new RecommendationError(`Gemini returned ${res.status}`);
+    if (!res.ok) {
+      // Log Gemini's error body server-side — it names the real cause (invalid
+      // key, model not found/retired, quota, bad schema) that the client's
+      // generic 502 hides. Never logs the key. (A retired model id here is
+      // exactly what this once masked.)
+      const errorBody = await res.text().catch(() => "<unreadable>");
+      console.error(`[recommend] Gemini non-200 status=${res.status} body=${errorBody.slice(0, 1200)}`);
+      throw new RecommendationError(`Gemini returned ${res.status}`);
+    }
 
     const data = await res.json().catch(() => null);
     const text = extractText(data);

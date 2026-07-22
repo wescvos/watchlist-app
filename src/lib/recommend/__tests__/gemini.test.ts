@@ -19,6 +19,7 @@ function stubFetchJson(payload: unknown, opts: { ok?: boolean; status?: number }
     ok: opts.ok ?? true,
     status: opts.status ?? 200,
     json: async () => payload,
+    text: async () => (typeof payload === "string" ? payload : JSON.stringify(payload)),
   } as unknown as Response;
   const fn = vi.fn(async () => res);
   vi.stubGlobal("fetch", fn);

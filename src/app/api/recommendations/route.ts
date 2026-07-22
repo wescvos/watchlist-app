@@ -18,6 +18,12 @@ export async function POST() {
     if (result.empty) return NextResponse.json({ empty: true });
     return NextResponse.json(result.set);
   } catch (e) {
+    // Server-side breadcrumb so a generation failure isn't fully silent (the
+    // client only sees a generic 502/504).
+    console.error(
+      "[api/recommendations] POST failed:",
+      e instanceof RecommendationError ? `${e.name}(${e.kind}): ${e.message}` : e,
+    );
     if (e instanceof RecommendationError && e.kind === "timeout") {
       return NextResponse.json({ error: "Recommendations timed out. Try again." }, { status: 504 });
     }
