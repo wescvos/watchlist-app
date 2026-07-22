@@ -20,6 +20,20 @@ function formatGeneratedAt(iso: string): string {
   return d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
 }
 
+// Poster-shaped placeholders, reused for the initial load and while a first
+// set is generating (generation takes a few seconds, so a skeleton reads as
+// "working" better than a lone line of text). animate-pulse is disabled for
+// reduced-motion users by the global rule in globals.css.
+function SkeletonGrid() {
+  return (
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3" aria-hidden="true">
+      {[0, 1, 2, 3, 4, 5].map((i) => (
+        <div key={i} className="aspect-[2/3] w-full animate-pulse rounded-lg bg-gray-200 motion-reduce:animate-none dark:bg-white/10" />
+      ))}
+    </div>
+  );
+}
+
 export default function RecommendedPage() {
   // loading = initial GET in flight; ready = GET resolved (with a set or null).
   const [loading, setLoading] = useState(true);
@@ -107,11 +121,7 @@ export default function RecommendedPage() {
       )}
 
       {loading ? (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3" aria-hidden="true">
-          {[0, 1, 2, 3, 4, 5].map((i) => (
-            <div key={i} className="aspect-[2/3] w-full animate-pulse rounded-lg bg-gray-200 motion-reduce:animate-none dark:bg-white/10" />
-          ))}
-        </div>
+        <SkeletonGrid />
       ) : hasPopulatedSet ? (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 fade-in">
           {suggestions.map((s) => (
@@ -119,7 +129,10 @@ export default function RecommendedPage() {
           ))}
         </div>
       ) : generating ? (
-        <p className="py-16 text-center text-sm text-gray-500">Finding recommendations…</p>
+        <>
+          <p role="status" className="mb-3 meta">Finding recommendations…</p>
+          <SkeletonGrid />
+        </>
       ) : set != null ? (
         // A set came back with nothing new (all resolved titles already listed).
         <div className="py-16 text-center">
