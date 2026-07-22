@@ -51,3 +51,13 @@ model Title {
 
   @@unique([tmdbId, mediaType])
 }
+
+model RecommendationSet {
+  id          String   @id @default(cuid())
+  suggestions Json     @default("[]")
+  model       String
+  sourceCount Int      @default(0)
+  generatedAt DateTime @default(now())
+
+  @@index([generatedAt])
+}
