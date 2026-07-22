@@ -86,6 +86,22 @@ function buildPrompt(history: RatedTitle[]): string {
   ].join("\n");
 }
 
+function getFinishReason(data: unknown): string {
+  if (!data || typeof data !== "object") return "<none>";
+  const candidates = (data as { candidates?: unknown }).candidates;
+  if (!Array.isArray(candidates) || candidates.length === 0) return "<none>";
+  const fr = (candidates[0] as { finishReason?: unknown }).finishReason;
+  return typeof fr === "string" ? fr : "<none>";
+}
+
+// Token counts only (no content) — thoughtsTokenCount is the tell for a
+// thinking model eating the output budget before emitting JSON.
+function summarizeUsage(data: unknown): string {
+  const u = (data as { usageMetadata?: Record<string, unknown> })?.usageMetadata;
+  if (!u || typeof u !== "object") return "<none>";
+  return `prompt=${u.promptTokenCount} thoughts=${u.thoughtsTokenCount} candidates=${u.candidatesTokenCount} total=${u.totalTokenCount}`;
+}
+
 // candidates[0].content.parts[0].text, guarded at every hop so a shape change
 // degrades to null (caller treats as failure) instead of throwing a TypeError.
 function extractText(data: unknown): string | null {
@@ -139,8 +155,9 @@ export class GeminiRecommendationProvider implements RecommendationProvider {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) throw new RecommendationError("GEMINI_API_KEY is not set");
 
+    const promptText = buildPrompt(req.history);
     const body = {
-      contents: [{ role: "user", parts: [{ text: buildPrompt(req.history) }] }],
+      contents: [{ role: "user", parts: [{ text: promptText }] }],
       generationConfig: {
         responseMimeType: "application/json",
         responseSchema: RESPONSE_SCHEMA,
@@ -182,10 +199,29 @@ export class GeminiRecommendationProvider implements RecommendationProvider {
 
     const data = await res.json().catch(() => null);
     const text = extractText(data);
-    if (text == null) throw new RecommendationError("Gemini response had no text part");
+    if (text == null) {
+      // TEMP diagnostics (remove once root-caused). Pure starvation case: thinking
+      // consumed the whole budget, zero output tokens.
+      console.error(
+        `[recommend] no text part: finishReason=${getFinishReason(data)} usage=${summarizeUsage(data)} ` +
+          `historyCount=${req.history.length} promptLen=${promptText.length}`,
+      );
+      throw new RecommendationError("Gemini response had no text part");
+    }
 
     const suggestions = parseSuggestions(text);
-    if (suggestions.length === 0) throw new RecommendationError("Gemini returned no valid suggestions");
+    if (suggestions.length === 0) {
+      // TEMP diagnostics (remove once root-caused). Why did valid entries come
+      // back empty for the real, larger history? finishReason + token usage
+      // (thoughts vs candidates) + text size/head (Gemini's output, not the
+      // key/history) tell MAX_TOKENS/truncation from a genuine empty result.
+      console.error(
+        `[recommend] zero valid: finishReason=${getFinishReason(data)} usage=${summarizeUsage(data)} ` +
+          `textLen=${text.length} historyCount=${req.history.length} promptLen=${promptText.length} ` +
+          `textHead=${JSON.stringify(text.slice(0, 500))}`,
+      );
+      throw new RecommendationError("Gemini returned no valid suggestions");
+    }
     return suggestions;
   }
 }
