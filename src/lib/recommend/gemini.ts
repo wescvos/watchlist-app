@@ -26,13 +26,17 @@ const TARGET_COUNT = 12;
 const REASON_MAX_LEN = 200;
 
 // Thrown for every failure mode (non-200, network, timeout, empty/invalid
-// output) so the caller can map it to a clean HTTP status without inspecting
-// error shapes.
+// output). The `kind` discriminator lets the API route map a timeout to 504
+// and everything else to 502 without string-matching the message.
+export type RecommendationErrorKind = "timeout" | "failure";
+
 export class RecommendationError extends Error {
+  readonly kind: RecommendationErrorKind;
   readonly cause?: unknown;
-  constructor(message: string, cause?: unknown) {
+  constructor(message: string, kind: RecommendationErrorKind = "failure", cause?: unknown) {
     super(message);
     this.name = "RecommendationError";
+    this.kind = kind;
     this.cause = cause;
   }
 }
@@ -152,8 +156,10 @@ export class GeminiRecommendationProvider implements RecommendationProvider {
         signal: controller.signal,
       });
     } catch (e) {
+      const aborted = controller.signal.aborted;
       throw new RecommendationError(
-        controller.signal.aborted ? "Gemini request timed out" : "Gemini request failed",
+        aborted ? "Gemini request timed out" : "Gemini request failed",
+        aborted ? "timeout" : "failure",
         e,
       );
     } finally {
