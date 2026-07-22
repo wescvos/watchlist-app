@@ -23,9 +23,13 @@ const ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${GEMI
 // Give up on Gemini after this; the API route turns a timeout into "keep the
 // cached set" rather than hanging the screen.
 const TIMEOUT_MS = 20_000;
-// Ceilings so one oversized response can't blow the free-tier token budget or
-// the layout. The model is also told the target count in the prompt.
-const MAX_OUTPUT_TOKENS = 2048;
+// gemini-flash-latest is a "thinking" model: its reasoning tokens
+// (thoughtsTokenCount, seen at ~1,000-1,600) share this budget with the actual
+// JSON output. 2048 left too little headroom, so a rich history truncated the
+// JSON mid-array -> parse dropped everything -> "no valid suggestions". 8192
+// comfortably fits thinking + a full set. (thinkingBudget:0 is rejected 400 on
+// this model, so raising the ceiling is the lever, not disabling thinking.)
+const MAX_OUTPUT_TOKENS = 8192;
 const TARGET_COUNT = 12;
 const REASON_MAX_LEN = 200;
 
@@ -199,27 +203,18 @@ export class GeminiRecommendationProvider implements RecommendationProvider {
 
     const data = await res.json().catch(() => null);
     const text = extractText(data);
+    // Concise, permanent breadcrumb on the empty-output paths: finishReason +
+    // token usage is exactly what catches a recurrence of thinking-token
+    // starvation (MAX_TOKENS with thoughts high, candidates truncated). No
+    // content, key, or history logged.
     if (text == null) {
-      // TEMP diagnostics (remove once root-caused). Pure starvation case: thinking
-      // consumed the whole budget, zero output tokens.
-      console.error(
-        `[recommend] no text part: finishReason=${getFinishReason(data)} usage=${summarizeUsage(data)} ` +
-          `historyCount=${req.history.length} promptLen=${promptText.length}`,
-      );
+      console.error(`[recommend] no text part: finishReason=${getFinishReason(data)} usage=${summarizeUsage(data)}`);
       throw new RecommendationError("Gemini response had no text part");
     }
 
     const suggestions = parseSuggestions(text);
     if (suggestions.length === 0) {
-      // TEMP diagnostics (remove once root-caused). Why did valid entries come
-      // back empty for the real, larger history? finishReason + token usage
-      // (thoughts vs candidates) + text size/head (Gemini's output, not the
-      // key/history) tell MAX_TOKENS/truncation from a genuine empty result.
-      console.error(
-        `[recommend] zero valid: finishReason=${getFinishReason(data)} usage=${summarizeUsage(data)} ` +
-          `textLen=${text.length} historyCount=${req.history.length} promptLen=${promptText.length} ` +
-          `textHead=${JSON.stringify(text.slice(0, 500))}`,
-      );
+      console.error(`[recommend] zero valid suggestions: finishReason=${getFinishReason(data)} usage=${summarizeUsage(data)}`);
       throw new RecommendationError("Gemini returned no valid suggestions");
     }
     return suggestions;

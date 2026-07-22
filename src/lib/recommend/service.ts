@@ -17,6 +17,12 @@ export interface GenerateResult {
   set: RecommendationSet | null;
 }
 
+// The model doesn't need an entire (100+ title) watched list to infer taste,
+// and an unbounded history inflates the prompt and the model's thinking, which
+// is what starved the output budget. Send at most the strongest-signal slice:
+// highest-rated first, most-recently-watched as the tiebreak.
+const MAX_HISTORY = 50;
+
 // Only WATCHED titles that carry a rating feed the recommender, mapped to the
 // privacy whitelist here (title, year, mediaType, myRating) so nothing else can
 // reach the provider.
@@ -24,6 +30,8 @@ export async function buildRatedHistory(): Promise<RatedTitle[]> {
   const rows = await prisma.title.findMany({
     where: { status: Status.WATCHED, myRating: { not: null } },
     select: { title: true, year: true, mediaType: true, myRating: true },
+    orderBy: [{ myRating: "desc" }, { watchedAt: "desc" }],
+    take: MAX_HISTORY,
   });
   return rows.map((r) => ({
     title: r.title,

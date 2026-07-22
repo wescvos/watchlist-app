@@ -48,8 +48,11 @@ describe("buildRatedHistory", () => {
       { title: "Whiplash", year: 2014, mediaType: "MOVIE", myRating: 9 },
     ] as unknown as Awaited<ReturnType<typeof prisma.title.findMany>>);
     const out = await buildRatedHistory();
-    const where = findMany.mock.calls[0][0]?.where;
-    expect(where).toEqual({ status: "WATCHED", myRating: { not: null } });
+    const arg = findMany.mock.calls[0][0];
+    expect(arg?.where).toEqual({ status: "WATCHED", myRating: { not: null } });
+    // Capped, strongest-signal slice: highest-rated first, recency as tiebreak.
+    expect(arg?.orderBy).toEqual([{ myRating: "desc" }, { watchedAt: "desc" }]);
+    expect(arg?.take).toBe(50);
     expect(out).toEqual([{ title: "Whiplash", year: 2014, mediaType: "MOVIE", myRating: 9 }]);
   });
 });
