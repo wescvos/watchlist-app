@@ -82,6 +82,7 @@ function buildPrompt(history: RatedTitle[]): string {
     "You are a film and TV recommendation engine.",
     "Below is one person's watch history with the personal rating (0-10) they gave each title.",
     "Recommend titles they have NOT listed that fit their taste, favouring what their higher-rated titles have in common (genre, tone, era, director, cast).",
+    "Favour less-obvious, deeper-cut picks over the most predictable neighbours — adjacent genres, directors, and eras that a knowledgeable friend would suggest, not just the algorithm's top hit.",
     `Return at most ${TARGET_COUNT} suggestions as a JSON array matching the provided schema.`,
     "Each 'reason' must be a single concise sentence tying the pick to their taste.",
     "Do not recommend any title already present in the history below.",
@@ -161,7 +162,10 @@ export class GeminiRecommendationProvider implements RecommendationProvider {
       generationConfig: {
         responseMimeType: "application/json",
         responseSchema: RESPONSE_SCHEMA,
-        temperature: 0.7,
+        // Modest bump from 0.7 for more varied picks; structured-output mode +
+        // the responseSchema still hold the JSON contract, so this doesn't risk
+        // malformed output.
+        temperature: 0.9,
         maxOutputTokens: MAX_OUTPUT_TOKENS,
       },
     };

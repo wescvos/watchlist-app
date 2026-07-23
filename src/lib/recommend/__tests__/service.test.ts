@@ -41,6 +41,15 @@ function watchedRow() {
     ReturnType<typeof prisma.title.findMany>
   >;
 }
+// n rated rows in the order the DB returns them (rating desc), T0 highest.
+function rows(n: number) {
+  return Array.from({ length: n }, (_, i) => ({
+    title: `T${i}`,
+    year: 2000 + (i % 20),
+    mediaType: i % 3 === 0 ? "TV" : "MOVIE",
+    myRating: Math.max(1, 10 - Math.floor(i / 6)),
+  })) as unknown as Awaited<ReturnType<typeof prisma.title.findMany>>;
+}
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -49,22 +58,38 @@ beforeEach(() => {
 });
 
 describe("buildRatedHistory", () => {
-  it("selects only watched + rated titles and maps to the whitelist", async () => {
-    findMany.mockResolvedValue(watchedRow());
-    const out = await buildRatedHistory();
+  it("queries watched + rated titles, ordered by rating then recency, unbounded", async () => {
+    findMany.mockResolvedValue(rows(3));
+    await buildRatedHistory();
     const arg = findMany.mock.calls[0][0];
     expect(arg?.where).toEqual({ status: "WATCHED", myRating: { not: null } });
-    // Capped, strongest-signal slice: highest-rated first, recency as tiebreak.
     expect(arg?.orderBy).toEqual([{ myRating: "desc" }, { watchedAt: "desc" }]);
-    expect(arg?.take).toBe(50);
-    expect(out).toEqual([{ title: "Whiplash", year: 2014, mediaType: "MOVIE", myRating: 9 }]);
+    expect(arg?.take).toBeUndefined(); // sampling happens in JS now, not via take
+  });
+
+  it("returns all titles (no padding) when the history is at or under the sample size", async () => {
+    findMany.mockResolvedValue(rows(5));
+    const out = await buildRatedHistory();
+    expect(out).toHaveLength(5);
+    expect(new Set(out.map((t) => t.title))).toEqual(new Set(["T0", "T1", "T2", "T3", "T4"]));
+  });
+
+  it("always includes the top-10 anchors and caps at the sample size for a large history", async () => {
+    findMany.mockResolvedValue(rows(60));
+    const out = await buildRatedHistory();
+    expect(out).toHaveLength(40); // SAMPLE_SIZE
+    const titles = out.map((t) => t.title);
+    for (let i = 0; i < 10; i++) expect(titles).toContain(`T${i}`); // top-10 anchors always present
+    expect(new Set(titles).size).toBe(40); // no duplicates
+    const input = new Set(Array.from({ length: 60 }, (_, i) => `T${i}`));
+    expect(titles.every((t) => input.has(t))).toBe(true); // everything drawn from the real history
   });
 });
 
 describe("resolveSuggestions", () => {
   it("resolves a single confident match to a linkable suggestion", async () => {
     searchMock.mockResolvedValueOnce([sr({ tmdbId: 10, title: "Sicario", mediaType: "MOVIE", year: 2015, posterUrl: "p" })]);
-    const resolved = await resolveSuggestions([raw({ title: "Sicario", year: 2015, mediaType: "MOVIE", reason: "tense" })]);
+    const { resolved } = await resolveSuggestions([raw({ title: "Sicario", year: 2015, mediaType: "MOVIE", reason: "tense" })]);
     expect(resolved).toEqual([
       { tmdbId: 10, mediaType: "MOVIE", title: "Sicario", year: 2015, posterUrl: "p", reason: "tense" },
     ]);
@@ -76,7 +101,7 @@ describe("resolveSuggestions", () => {
       sr({ tmdbId: 1, title: "Fargo", mediaType: "MOVIE", year: 1996, voteCount: 8000, popularity: 40 }),
       sr({ tmdbId: 2, title: "Fargo", mediaType: "TV", year: 2014, voteCount: 3000, popularity: 30 }),
     ]);
-    const resolved = await resolveSuggestions([raw({ title: "Fargo", year: 2014, mediaType: "TV" })]);
+    const { resolved } = await resolveSuggestions([raw({ title: "Fargo", year: 2014, mediaType: "TV" })]);
     expect(resolved.map((r) => r.tmdbId)).toEqual([2]);
   });
 
@@ -85,21 +110,22 @@ describe("resolveSuggestions", () => {
       sr({ tmdbId: 3, title: "The Office", mediaType: "TV", year: 2005, voteCount: 4000, popularity: 30 }),
       sr({ tmdbId: 4, title: "The Office", mediaType: "TV", year: 2001, voteCount: 3500, popularity: 28 }),
     ]);
-    const resolved = await resolveSuggestions([raw({ title: "The Office", year: null, mediaType: "TV" })]);
+    const { resolved } = await resolveSuggestions([raw({ title: "The Office", year: null, mediaType: "TV" })]);
     expect(resolved).toEqual([]);
   });
 
-  it("drops a suggestion already in the library", async () => {
+  it("drops a suggestion already in the library, but still counts it as matched", async () => {
     searchMock.mockResolvedValueOnce([sr({ tmdbId: 10, title: "Sicario", mediaType: "MOVIE", year: 2015 })]);
     findUnique.mockResolvedValueOnce({ id: "existing" } as unknown as Awaited<ReturnType<typeof prisma.title.findUnique>>);
-    const resolved = await resolveSuggestions([raw({ title: "Sicario", year: 2015, mediaType: "MOVIE" })]);
+    const { resolved, matched } = await resolveSuggestions([raw({ title: "Sicario", year: 2015, mediaType: "MOVIE" })]);
     expect(resolved).toEqual([]);
+    expect(matched).toBe(1); // resolved to a real title, then excluded by the filter
   });
 
   it("drops a suggestion that has been dismissed", async () => {
     dismissedMock.mockResolvedValue(new Set(["MOVIE:10"]));
     searchMock.mockResolvedValueOnce([sr({ tmdbId: 10, title: "Sicario", mediaType: "MOVIE", year: 2015 })]);
-    const resolved = await resolveSuggestions([raw({ title: "Sicario", year: 2015, mediaType: "MOVIE" })]);
+    const { resolved } = await resolveSuggestions([raw({ title: "Sicario", year: 2015, mediaType: "MOVIE" })]);
     expect(resolved).toEqual([]);
     // Dismissed short-circuits before the library lookup.
     expect(findUnique).not.toHaveBeenCalled();
@@ -108,7 +134,7 @@ describe("resolveSuggestions", () => {
   it("dedupes two suggestions that resolve to the same title", async () => {
     const hit = [sr({ tmdbId: 10, title: "Sicario", mediaType: "MOVIE", year: 2015 })];
     searchMock.mockResolvedValueOnce(hit).mockResolvedValueOnce(hit);
-    const resolved = await resolveSuggestions([
+    const { resolved } = await resolveSuggestions([
       raw({ title: "Sicario", year: 2015, mediaType: "MOVIE" }),
       raw({ title: "Sicario", year: 2015, mediaType: "MOVIE" }),
     ]);

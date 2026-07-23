@@ -16,28 +16,54 @@ export interface GenerateResult {
   set: RecommendationSet | null;
 }
 
-// The model doesn't need an entire (100+ title) watched list to infer taste,
-// and an unbounded history inflates the prompt and the model's thinking, which
-// is what starved the output budget. Send at most the strongest-signal slice:
-// highest-rated first, most-recently-watched as the tiebreak.
-const MAX_HISTORY = 50;
+// Sampling sizes. Kept well under the 50 that was proven safe for the thinking
+// model's shared token budget, so this can't regress the MAX_TOKENS starvation.
+const SAMPLE_SIZE = 40; // total titles sent to the model per refresh
+const ANCHOR_COUNT = 10; // always-included top-rated titles
+
+// Weighted sampling without replacement (Efraimidis-Spirakis): each item gets a
+// key u^(1/weight); the largest keys win. A higher rating is a higher weight,
+// so good films are likelier but not guaranteed, and the winning set differs
+// between refreshes. Rating 0 still gets a small non-zero weight (+1).
+function weightedSample(items: RatedTitle[], k: number): RatedTitle[] {
+  if (items.length <= k) return items;
+  return items
+    .map((t) => ({ t, key: Math.random() ** (1 / ((t.myRating ?? 0) + 1)) }))
+    .sort((a, b) => b.key - a.key)
+    .slice(0, k)
+    .map((x) => x.t);
+}
 
 // Only WATCHED titles that carry a rating feed the recommender, mapped to the
 // privacy whitelist here (title, year, mediaType, myRating) so nothing else can
 // reach the provider.
+//
+// Sampling, not the fixed top-50: sending the identical strongest titles every
+// refresh made the model reason over the same input and circle the same obvious
+// neighbours, which the exclusion filter then mostly removed — a trickle. So we
+// anchor on the top-rated few (keeps every refresh on-target) and fill the rest
+// with a weighted-random draw from the remaining rated titles (introduces
+// variety). This widens the net; it does NOT manufacture endless novelty — the
+// genuinely-new pool still shrinks as titles get added/dismissed, which
+// graceful exhaustion handles. It only stops ARTIFICIALLY starving the batch.
 export async function buildRatedHistory(): Promise<RatedTitle[]> {
   const rows = await prisma.title.findMany({
     where: { status: Status.WATCHED, myRating: { not: null } },
     select: { title: true, year: true, mediaType: true, myRating: true },
     orderBy: [{ myRating: "desc" }, { watchedAt: "desc" }],
-    take: MAX_HISTORY,
   });
-  return rows.map((r) => ({
+  const all: RatedTitle[] = rows.map((r) => ({
     title: r.title,
     year: r.year,
     mediaType: r.mediaType as MediaKind,
     myRating: r.myRating,
   }));
+  // Small library: send everything, no sampling, no padding.
+  if (all.length <= SAMPLE_SIZE) return all;
+
+  const anchors = all.slice(0, ANCHOR_COUNT);
+  const varied = weightedSample(all.slice(ANCHOR_COUNT), SAMPLE_SIZE - ANCHOR_COUNT);
+  return [...anchors, ...varied];
 }
 
 // Same or adjacent year only; if the model gave no year, don't gate on it.
@@ -52,10 +78,19 @@ function yearMatches(wanted: number | null, actual: number | null): boolean {
 // LLM's mediaType + year as strong pre-filters, DROPS anything ambiguous or
 // with no dominant match rather than guessing, dedupes, and excludes anything
 // already on a list (Want/Watched) or permanently dismissed.
-export async function resolveSuggestions(raw: RawSuggestion[]): Promise<ResolvedSuggestion[]> {
+export interface ResolveResult {
+  resolved: ResolvedSuggestion[];
+  // Distinct suggestions that resolved to a real TMDb title, BEFORE the
+  // Want/Watched/Dismissed exclusion filter. Only used for the diagnostic
+  // batch log (raw → matched → new), not for control flow.
+  matched: number;
+}
+
+export async function resolveSuggestions(raw: RawSuggestion[]): Promise<ResolveResult> {
   const resolved: ResolvedSuggestion[] = [];
   const seen = new Set<string>();
   const dismissed = await getDismissedKeySet();
+  let matched = 0;
 
   for (const s of raw) {
     const results = await searchTitles(s.title);
@@ -69,6 +104,7 @@ export async function resolveSuggestions(raw: RawSuggestion[]): Promise<Resolved
     const key = `${c.mediaType}:${c.tmdbId}`;
     if (seen.has(key)) continue; // two suggestions resolved to the same title
     seen.add(key);
+    matched++; // a distinct, real TMDb title (pre-exclusion)
     if (dismissed.has(key)) continue; // permanently "not interested"
 
     const existing = await prisma.title.findUnique({
@@ -87,7 +123,7 @@ export async function resolveSuggestions(raw: RawSuggestion[]): Promise<Resolved
     });
   }
 
-  return resolved;
+  return { resolved, matched };
 }
 
 // Build history → provider → resolve → persist. The provider throws (→ the
@@ -103,7 +139,13 @@ export async function generateRecommendations(): Promise<GenerateResult> {
 
   const provider = getProvider();
   const raw = await provider.recommend({ history });
-  const resolved = await resolveSuggestions(raw);
+  const { resolved, matched } = await resolveSuggestions(raw);
+
+  // Success-path breadcrumb: three counts only (no content, no key) so a
+  // thin-but-successful batch is diagnosable without guessing. raw = what the
+  // model returned, matched = resolved to a real TMDb title, new = survived the
+  // Want+Watched+Dismissed filter.
+  console.log(`[recommend] batch: raw=${raw.length} matched=${matched} new=${resolved.length}`);
 
   const set = await saveRecommendationSet({
     suggestions: resolved,
