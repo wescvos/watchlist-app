@@ -31,7 +31,10 @@ export function TitleCard({ t, status }: { t: CardTitle; status: "WANT" | "WATCH
           // w342 is plenty for these ~120px grid tiles (stored URL is w500);
           // lazy so a long list doesn't eagerly fetch every below-the-fold poster.
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={t.posterUrl.replace("/w500/", "/w342/")} alt={t.title} loading="lazy" className="h-full w-full object-cover" />
+          {/* BISECT (temporary): loading="lazy" removed to test whether it's
+              what blanks the grid on back-nav remount (lazy defers the load a
+              frame past layout). Reverts that part of 42cb441. */}
+          <img src={t.posterUrl.replace("/w500/", "/w342/")} alt={t.title} className="h-full w-full object-cover" />
         ) : (
           <div className="flex h-full items-center justify-center p-2 text-center meta">
             {t.title}
