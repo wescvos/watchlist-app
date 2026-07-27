@@ -5,8 +5,32 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { BackLink } from "@/components/BackLink";
 import type { SearchResultWithLibrary } from "@/lib/types";
 import { listCache } from "@/lib/listCache";
+import { installNavDebug, logNav } from "@/lib/navDebug"; // TEMP diagnostics
 
 type Result = SearchResultWithLibrary;
+
+// TEMP diagnostics — mirrors DebugHome on the search flow: logs mount (new id ⇒
+// remount) and a render-by-render snapshot (results + wall length, busy,
+// searched) so we can see if search re-mounts with empty data on back-nav.
+let __searchInstanceSeq = 0;
+function DebugSearch(props: { instanceId: number; results: number; wall: number; busy: boolean; searched: boolean }) {
+  useEffect(() => {
+    installNavDebug();
+    logNav(`search-MOUNT#${props.instanceId}`, {
+      cacheWANT: listCache.WANT.titles.length,
+      wantLoaded: listCache.WANT.loaded,
+    });
+  }, [props.instanceId]);
+  useEffect(() => {
+    logNav(`search-render#${props.instanceId}`, {
+      results: props.results,
+      wall: props.wall,
+      busy: props.busy,
+      searched: props.searched,
+    });
+  });
+  return null;
+}
 
 const DEBOUNCE_MS = 350;
 const MIN_LIVE_QUERY_LENGTH = 2;
@@ -61,6 +85,7 @@ export default function SearchPage() {
   const inputRef = useRef<HTMLInputElement>(null);
   const headerRef = useRef<HTMLDivElement>(null);
   const [headerHeight, setHeaderHeight] = useState(0);
+  const [searchInstanceId] = useState(() => ++__searchInstanceSeq); // TEMP diagnostics
 
   // Belt-and-suspenders alongside the native autoFocus attribute below: some
   // mobile browsers only reliably open the keyboard from an imperative focus().
@@ -220,6 +245,13 @@ export default function SearchPage() {
 
   return (
     <>
+      <DebugSearch
+        instanceId={searchInstanceId}
+        results={results.length}
+        wall={wallPosters.length}
+        busy={busy}
+        searched={searched}
+      />
       {/* Fixed (not sticky) with its own safe-area padding, so the header
           stays pinned below the status bar at all times — including when the
           on-screen keyboard's focus-scroll behavior shoves the page upward —

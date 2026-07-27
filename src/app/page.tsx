@@ -6,6 +6,7 @@ import { ListToggle } from "@/components/ListToggle";
 import { TitleCard, type CardTitle } from "@/components/TitleCard";
 import type { MediaKind } from "@/lib/types";
 import { listCache, type ListState, type Status } from "@/lib/listCache";
+import { installNavDebug, logNav } from "@/lib/navDebug"; // TEMP diagnostics
 
 // Isolated so only this reads the URL — keeps the rest of the page server-rendered
 // instead of the whole tree bailing to client-only rendering for useSearchParams.
@@ -120,14 +121,25 @@ function DebugHome(props: {
   showFilteredEmpty: boolean;
 }) {
   useEffect(() => {
-    console.log(
-      `[home-MOUNT #${props.instanceId} t=${Math.round(performance.now())}ms] cacheWANT=${listCache.WANT.titles.length} wantLoaded=${listCache.WANT.loaded} cacheWATCHED=${listCache.WATCHED.titles.length}`,
-    );
+    installNavDebug();
+    logNav(`home-MOUNT#${props.instanceId}`, {
+      cacheWANT: listCache.WANT.titles.length,
+      wantLoaded: listCache.WANT.loaded,
+      cacheWATCHED: listCache.WATCHED.titles.length,
+    });
   }, [props.instanceId]);
   useEffect(() => {
-    console.log(
-      `[home-render #${props.instanceId} t=${Math.round(performance.now())}ms] loaded=${props.loaded} titles=${props.titles} display=${props.display} status=${props.status} genre=${props.genre} type=${props.type} sort=${props.sort} skeleton=${props.showSkeleton} filteredEmpty=${props.showFilteredEmpty}`,
-    );
+    logNav(`home-render#${props.instanceId}`, {
+      loaded: props.loaded,
+      titles: props.titles,
+      display: props.display,
+      status: props.status,
+      genre: props.genre,
+      type: props.type,
+      sort: props.sort,
+      skeleton: props.showSkeleton,
+      filteredEmpty: props.showFilteredEmpty,
+    });
   });
   return null;
 }
