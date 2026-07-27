@@ -7,7 +7,6 @@ import { ExternalRatings } from "@/components/ExternalRatings";
 import { CastCarousel } from "@/components/CastCarousel";
 import { WatchProviders } from "@/components/WatchProviders";
 import type { MergedTitle } from "@/lib/fetchTitle";
-import { logNav } from "@/lib/navDebug"; // TEMP diagnostics
 
 export function TitlePreview({ title }: { title: MergedTitle }) {
   const router = useRouter();
@@ -27,7 +26,6 @@ export function TitlePreview({ title }: { title: MergedTitle }) {
         return;
       }
       const t = await res.json();
-      logNav("preview-add → router.push(/title/:id)"); // TEMP diagnostics
       router.push(`/title/${t.id}`);
     } catch {
       setError(`Couldn't add "${title.title}". Please try again.`);
@@ -38,7 +36,7 @@ export function TitlePreview({ title }: { title: MergedTitle }) {
 
   return (
     <main className="mx-auto w-full max-w-2xl p-4 pb-24 fade-in">
-      <BackLink onClick={() => { logNav("preview-BackLink → router.back()"); router.back(); }} label="Back to search" />
+      <BackLink onClick={() => router.back()} label="Back to search" />
 
       <TitleHeader
         title={title.title}

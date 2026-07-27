@@ -5,32 +5,8 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { BackLink } from "@/components/BackLink";
 import type { SearchResultWithLibrary } from "@/lib/types";
 import { listCache } from "@/lib/listCache";
-import { installNavDebug, logNav } from "@/lib/navDebug"; // TEMP diagnostics
 
 type Result = SearchResultWithLibrary;
-
-// TEMP diagnostics — mirrors DebugHome on the search flow: logs mount (new id ⇒
-// remount) and a render-by-render snapshot (results + wall length, busy,
-// searched) so we can see if search re-mounts with empty data on back-nav.
-let __searchInstanceSeq = 0;
-function DebugSearch(props: { instanceId: number; results: number; wall: number; busy: boolean; searched: boolean }) {
-  useEffect(() => {
-    installNavDebug();
-    logNav(`search-MOUNT#${props.instanceId}`, {
-      cacheWANT: listCache.WANT.titles.length,
-      wantLoaded: listCache.WANT.loaded,
-    });
-  }, [props.instanceId]);
-  useEffect(() => {
-    logNav(`search-render#${props.instanceId}`, {
-      results: props.results,
-      wall: props.wall,
-      busy: props.busy,
-      searched: props.searched,
-    });
-  });
-  return null;
-}
 
 const DEBOUNCE_MS = 350;
 const MIN_LIVE_QUERY_LENGTH = 2;
@@ -85,7 +61,6 @@ export default function SearchPage() {
   const inputRef = useRef<HTMLInputElement>(null);
   const headerRef = useRef<HTMLDivElement>(null);
   const [headerHeight, setHeaderHeight] = useState(0);
-  const [searchInstanceId] = useState(() => ++__searchInstanceSeq); // TEMP diagnostics
 
   // Belt-and-suspenders alongside the native autoFocus attribute below: some
   // mobile browsers only reliably open the keyboard from an imperative focus().
@@ -245,13 +220,6 @@ export default function SearchPage() {
 
   return (
     <>
-      <DebugSearch
-        instanceId={searchInstanceId}
-        results={results.length}
-        wall={wallPosters.length}
-        busy={busy}
-        searched={searched}
-      />
       {/* Fixed (not sticky) with its own safe-area padding, so the header
           stays pinned below the status bar at all times — including when the
           on-screen keyboard's focus-scroll behavior shoves the page upward —
@@ -341,7 +309,7 @@ export default function SearchPage() {
                   >
                     <div className="h-20 w-14 flex-shrink-0 overflow-hidden rounded bg-gray-100 ring-1 ring-black/5 dark:bg-white/5 dark:ring-white/10">
                       {r.posterUrl && /* eslint-disable-next-line @next/next/no-img-element */
-                        <img src={r.posterUrl} alt="" decoding="sync" className="h-full w-full object-cover" />}
+                        <img src={r.posterUrl} alt="" className="h-full w-full object-cover" />}
                     </div>
                     <div className="min-w-0 flex-1">
                       <p className="truncate font-medium">{r.title}</p>
@@ -390,7 +358,7 @@ export default function SearchPage() {
               {wallPosters.map((src, i) => (
                 <div key={i} className="aspect-[2/3] overflow-hidden rounded-md bg-gray-100 dark:bg-white/5">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={src} alt="" loading="lazy" decoding="sync" className="h-full w-full object-cover" />
+                  <img src={src} alt="" loading="lazy" className="h-full w-full object-cover" />
                 </div>
               ))}
             </div>

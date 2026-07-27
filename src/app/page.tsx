@@ -6,7 +6,6 @@ import { ListToggle } from "@/components/ListToggle";
 import { TitleCard, type CardTitle } from "@/components/TitleCard";
 import type { MediaKind } from "@/lib/types";
 import { listCache, type ListState, type Status } from "@/lib/listCache";
-import { installNavDebug, logNav } from "@/lib/navDebug"; // TEMP diagnostics
 
 // Isolated so only this reads the URL — keeps the rest of the page server-rendered
 // instead of the whole tree bailing to client-only rendering for useSearchParams.
@@ -102,48 +101,6 @@ function sortWatchedByRating(titles: CardTitle[]): CardTitle[] {
   return titles.slice().sort((a, b) => ratingDescNullsLast(a.myRating, b.myRating));
 }
 
-// TEMP diagnostics for the back-nav grid blank — remove once root-caused. A
-// module-scoped counter: a NEW id in the logs on back-nav ⇒ Home remounted.
-let __homeInstanceSeq = 0;
-
-// TEMP diagnostics. Renders nothing; logs on mount and on every committed
-// render so we can read the sequence on the live site via remote debugging.
-function DebugHome(props: {
-  instanceId: number;
-  loaded: boolean;
-  titles: number;
-  display: number;
-  status: Status;
-  genre: string | null;
-  type: MediaKind | null;
-  sort: SortMode;
-  showSkeleton: boolean;
-  showFilteredEmpty: boolean;
-}) {
-  useEffect(() => {
-    installNavDebug();
-    logNav(`home-MOUNT#${props.instanceId}`, {
-      cacheWANT: listCache.WANT.titles.length,
-      wantLoaded: listCache.WANT.loaded,
-      cacheWATCHED: listCache.WATCHED.titles.length,
-    });
-  }, [props.instanceId]);
-  useEffect(() => {
-    logNav(`home-render#${props.instanceId}`, {
-      loaded: props.loaded,
-      titles: props.titles,
-      display: props.display,
-      status: props.status,
-      genre: props.genre,
-      type: props.type,
-      sort: props.sort,
-      skeleton: props.showSkeleton,
-      filteredEmpty: props.showFilteredEmpty,
-    });
-  });
-  return null;
-}
-
 export default function Home() {
   const [status, setStatus] = useState<Status>("WANT");
   const [reloadToken, setReloadToken] = useState(0);
@@ -174,7 +131,6 @@ export default function Home() {
     WANT: listCache.WANT.loaded,
     WATCHED: listCache.WATCHED.loaded,
   }));
-  const [homeInstanceId] = useState(() => ++__homeInstanceSeq); // TEMP diagnostics
   const router = useRouter();
 
   // The active tab plus the (Want-only) genre and type filters all live in the
@@ -311,21 +267,6 @@ export default function Home() {
 
   return (
     <main className="mx-auto w-full max-w-2xl p-4 pb-24">
-      {/* TEMP diagnostics — logs mount + a render-by-render snapshot so we can
-          see, on the live site, whether displayTitles is ever 0 on back-nav
-          (data-timing) or always N (⇒ the blank is image repaint on remount). */}
-      <DebugHome
-        instanceId={homeInstanceId}
-        loaded={current.loaded}
-        titles={current.titles.length}
-        display={displayTitles.length}
-        status={status}
-        genre={genreFilter}
-        type={typeFilter}
-        sort={sortModes[status]}
-        showSkeleton={showSkeleton}
-        showFilteredEmpty={showFilteredEmpty}
-      />
       <Suspense fallback={null}>
         <UrlStatusSync onStatus={handleUrlStatus} />
       </Suspense>

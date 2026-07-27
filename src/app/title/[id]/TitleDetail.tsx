@@ -7,7 +7,6 @@ import { ExternalRatings } from "@/components/ExternalRatings";
 import { CastCarousel } from "@/components/CastCarousel";
 import { WatchProviders } from "@/components/WatchProviders";
 import type { CastMember, WatchProvider } from "@/lib/types";
-import { logNav } from "@/lib/navDebug"; // TEMP diagnostics
 
 interface Title {
   id: string; title: string; year: number | null; posterUrl: string | null; backdropUrl: string | null;
@@ -72,7 +71,6 @@ export function TitleDetail({ title }: { title: Title }) {
   async function patch(body: Record<string, unknown>): Promise<boolean> {
     setSaving(true);
     setError("");
-    logNav("detail-patch (no router call in this path)", { body: JSON.stringify(body) }); // TEMP diagnostics
     try {
       const res = await fetch(`/api/titles/${title.id}`, { method: "PATCH", body: JSON.stringify(body) });
       if (!res.ok) {
@@ -147,7 +145,6 @@ export function TitleDetail({ title }: { title: Title }) {
         setError("Refresh failed. Please try again.");
         return;
       }
-      logNav("detail-refresh → router.refresh()"); // TEMP diagnostics
       router.refresh();
       showFlash("refresh");
     } catch {
@@ -166,7 +163,6 @@ export function TitleDetail({ title }: { title: Title }) {
         setError("Couldn't remove. Please try again.");
         return;
       }
-      logNav("detail-remove → router.push('/')"); // TEMP diagnostics
       router.push("/");
     } catch {
       setError("Couldn't remove. Please try again.");
@@ -190,7 +186,7 @@ export function TitleDetail({ title }: { title: Title }) {
 
   return (
     <main className="mx-auto w-full max-w-2xl p-4 pb-24 fade-in">
-      <BackLink onClick={() => { logNav("detail-BackLink → router.back()"); router.back(); }} label="Back to watchlist" />
+      <BackLink onClick={() => router.back()} label="Back to watchlist" />
 
       <TitleHeader
         title={title.title}
