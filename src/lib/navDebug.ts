@@ -4,15 +4,43 @@
 // can watch whether the history stack GROWS (→ the extra back step) and whether
 // a page RE-MOUNTS with empty data for a frame (→ the blank flash), on both the
 // home and search flows.
+//
+// Logs go to console AND to an on-screen buffer (rendered by NavDebugOverlay),
+// so they can be read/screenshotted directly on the phone without remote
+// debugging.
+
+const logLines: string[] = [];
+let version = 0;
+const listeners = new Set<() => void>();
+
+export function getNavDebugLines(): string[] {
+  return logLines;
+}
+export function getNavDebugVersion(): number {
+  return version;
+}
+export function subscribeNavDebug(fn: () => void): () => void {
+  listeners.add(fn);
+  return () => {
+    listeners.delete(fn);
+  };
+}
+
+function record(line: string): void {
+  logLines.push(line);
+  if (logLines.length > 40) logLines.shift();
+  version++;
+  listeners.forEach((l) => l());
+}
 
 export function logNav(tag: string, data: Record<string, unknown> = {}): void {
   if (typeof window === "undefined") return;
   const extra = Object.entries(data)
     .map(([k, v]) => `${k}=${v}`)
     .join(" ");
-  console.log(
-    `[${tag} t=${Math.round(performance.now())}ms path=${location.pathname} hist=${history.length}]${extra ? " " + extra : ""}`,
-  );
+  const line = `${tag} t=${Math.round(performance.now())}ms path=${location.pathname} hist=${history.length}${extra ? " " + extra : ""}`;
+  console.log(`[${line}]`);
+  record(line);
 }
 
 // Installed once (guarded on window) so the global popstate/pageshow listeners
