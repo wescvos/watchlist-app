@@ -341,7 +341,7 @@ export default function SearchPage() {
                   >
                     <div className="h-20 w-14 flex-shrink-0 overflow-hidden rounded bg-gray-100 ring-1 ring-black/5 dark:bg-white/5 dark:ring-white/10">
                       {r.posterUrl && /* eslint-disable-next-line @next/next/no-img-element */
-                        <img src={r.posterUrl} alt="" className="h-full w-full object-cover" />}
+                        <img src={r.posterUrl} alt="" decoding="sync" className="h-full w-full object-cover" />}
                     </div>
                     <div className="min-w-0 flex-1">
                       <p className="truncate font-medium">{r.title}</p>
@@ -390,7 +390,7 @@ export default function SearchPage() {
               {wallPosters.map((src, i) => (
                 <div key={i} className="aspect-[2/3] overflow-hidden rounded-md bg-gray-100 dark:bg-white/5">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={src} alt="" loading="lazy" className="h-full w-full object-cover" />
+                  <img src={src} alt="" loading="lazy" decoding="sync" className="h-full w-full object-cover" />
                 </div>
               ))}
             </div>
