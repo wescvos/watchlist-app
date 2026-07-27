@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, act } from "@testing-library/react";
 import SearchPage from "@/app/search/page";
 import { listCache, emptyListState, type Status } from "@/lib/listCache";
+import { resetSearchCache } from "@/lib/searchCache";
 import type { CardTitle } from "@/components/TitleCard";
 
 // The router object must be a single stable instance, matching the real
@@ -84,6 +85,9 @@ beforeEach(() => {
   // test's cache state can't leak into the next.
   listCache.WANT = emptyListState;
   listCache.WATCHED = emptyListState;
+  // Same reasoning for the search cache — a module-level singleton that now
+  // seeds SearchPage's initial state, so a prior test's results must not leak.
+  resetSearchCache();
 });
 afterEach(() => {
   vi.useRealTimers();

@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { BackLink } from "@/components/BackLink";
 import type { SearchResultWithLibrary } from "@/lib/types";
 import { listCache } from "@/lib/listCache";
+import { searchCache, resetSearchCache } from "@/lib/searchCache";
 
 type Result = SearchResultWithLibrary;
 
@@ -42,19 +43,24 @@ function UrlQuerySync({ onQuery }: { onQuery: (term: string) => void }) {
 }
 
 export default function SearchPage() {
-  const [q, setQ] = useState("");
-  const [results, setResults] = useState<Result[]>([]);
+  // Seed from the module-level searchCache (lazy initializers, synchronous
+  // before first paint) so a back-nav to a results view restores the query +
+  // results instantly — no blank/wall/skeleton churn. searchedForRef is seeded
+  // too so UrlQuerySync sees the URL's ?q as already-searched and doesn't
+  // re-fire the fetch. Cold load / no prior search → all empty, as before.
+  const [q, setQ] = useState(() => searchCache.q);
+  const [results, setResults] = useState<Result[]>(() => searchCache.results);
   const [busy, setBusy] = useState(false);
-  const [searched, setSearched] = useState(false);
-  const [searchedFor, setSearchedFor] = useState("");
-  const [searchError, setSearchError] = useState("");
+  const [searched, setSearched] = useState(() => searchCache.searched);
+  const [searchedFor, setSearchedFor] = useState(() => searchCache.searchedFor);
+  const [searchError, setSearchError] = useState(() => searchCache.searchError);
   // Lazy initializer runs synchronously before first paint, so a warm
   // navigation (Home already loaded the lists) renders the wall on the very
   // first render — no fetch, no flash of the fallback state first.
   const [wallPosters, setWallPosters] = useState<string[]>(cachedWallPosters);
   const hadCachedWallPosters = useRef(wallPosters.length > 0);
   const router = useRouter();
-  const searchedForRef = useRef("");
+  const searchedForRef = useRef(searchCache.searchedFor);
   const requestIdRef = useRef(0);
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const skipInitialDebounce = useRef(true);
@@ -130,15 +136,23 @@ export default function SearchPage() {
       const data: Result[] = await res.json();
       if (!isCurrent()) return; // an older response must never overwrite a newer one
       setResults(data);
+      searchCache.results = data;
+      searchCache.searchError = "";
     } catch {
       if (!isCurrent()) return;
       setResults([]);
       setSearchError("Search isn't responding right now. Try again in a moment.");
+      searchCache.results = [];
+      searchCache.searchError = "Search isn't responding right now. Try again in a moment.";
     } finally {
       if (isCurrent()) {
         setSearchedFor(term);
         setSearched(true);
         setBusy(false);
+        // Keep the cache mirroring the committed search so a remount restores it.
+        searchCache.q = term;
+        searchCache.searchedFor = term;
+        searchCache.searched = true;
       }
     }
   }, []);
@@ -176,6 +190,7 @@ export default function SearchPage() {
         setSearchedFor("");
         setSearchError("");
         setBusy(false);
+        resetSearchCache();
       }
       return;
     }
@@ -214,6 +229,7 @@ export default function SearchPage() {
     setSearchError("");
     setBusy(false);
     searchedForRef.current = "";
+    resetSearchCache();
     router.replace("/search", { scroll: false });
     inputRef.current?.focus();
   }
