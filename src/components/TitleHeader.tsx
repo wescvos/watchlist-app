@@ -34,6 +34,12 @@ export function TitleHeader({
     mediaType === "TV" && numberOfEpisodes ? `${numberOfEpisodes} episode${numberOfEpisodes === 1 ? "" : "s"}` : null,
   ].filter((v) => v != null);
 
+  // title + year + media-type hint disambiguates the many films/shows that
+  // share a title; filter(Boolean) drops a null year so there's no double space.
+  const titleSearchQuery = encodeURIComponent(
+    [title, year, mediaType === "MOVIE" ? "movie" : "TV series"].filter(Boolean).join(" "),
+  );
+
   return (
     <div className="relative -mx-4 overflow-hidden">
       {backdropUrl && (
@@ -51,7 +57,20 @@ export function TitleHeader({
             <img src={posterUrl.replace("/w500/", "/w342/")} alt={title} className="h-full w-full object-cover" />}
         </div>
         <div>
-          <h1 className="text-xl font-semibold">{title}</h1>
+          {/* Tappable → Google search for the title, same mechanism as the
+              cast links, but no dotted-underline affordance: identical at rest
+              (Tailwind preflight resets the anchor's color/underline), with only
+              a tap opacity and a keyboard focus ring added. */}
+          <h1 className="text-xl font-semibold">
+            <a
+              href={`https://www.google.com/search?q=${titleSearchQuery}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="cursor-pointer rounded transition-opacity active:opacity-60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground"
+            >
+              {title}
+            </a>
+          </h1>
           <p className="mt-0.5 meta">
             {metaParts.join(" ")}
           </p>
