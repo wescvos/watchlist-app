@@ -116,6 +116,21 @@ export default function Home() {
     });
   }, []);
   const skipNextStatusFetch = useRef(true);
+  // Per-list snapshot of whether each list's cache was already warm when this
+  // Home instance mounted. Gates the grid's entrance animation: a genuine cold
+  // load (cache empty → data arrives) fades in; a warm remount (Back from a
+  // title page, cache already populated) does not — replaying the fade from
+  // opacity 0 is the flash. Keyed per status so a not-yet-loaded tab still
+  // animates (and shows its skeleton) when its own data first arrives. NOTE:
+  // `loaded` is already seeded synchronously from listCache by the useState
+  // above, so a warm list is never `!loaded` on the first frame — there is no
+  // skeleton frame on a warm return; this only suppresses the redundant fade.
+  // useState (not useRef) with a lazy initializer: it captures the mount-time
+  // snapshot once and is safe to read during render (a ref isn't).
+  const [warmAtMount] = useState<Record<Status, boolean>>(() => ({
+    WANT: listCache.WANT.loaded,
+    WATCHED: listCache.WATCHED.loaded,
+  }));
   const router = useRouter();
 
   // The active tab plus the (Want-only) genre and type filters all live in the
@@ -384,7 +399,7 @@ export default function Home() {
           <p className="text-sm text-gray-500">{filteredEmptyMessage}</p>
         </div>
       ) : (
-        <div className="mt-2 grid grid-cols-3 gap-3 sm:grid-cols-4 fade-in">
+        <div className={`mt-2 grid grid-cols-3 gap-3 sm:grid-cols-4${warmAtMount[status] ? "" : " fade-in"}`}>
           {displayTitles.map((t) => <TitleCard key={t.id} t={t} status={status} />)}
         </div>
       )}
