@@ -50,6 +50,7 @@ export function TitlePreview({ title }: { title: MergedTitle }) {
         numberOfEpisodes={title.numberOfEpisodes}
         director={title.director}
         genres={title.genres}
+        spokenLanguages={title.spokenLanguages}
       />
 
       <ExternalRatings

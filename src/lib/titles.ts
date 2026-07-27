@@ -24,6 +24,7 @@ function toData(m: MergedTitle) {
     numberOfSeasons: m.numberOfSeasons,
     numberOfEpisodes: m.numberOfEpisodes,
     genres: m.genres,
+    spokenLanguages: m.spokenLanguages,
     cast: m.cast as unknown as Prisma.InputJsonValue,
     director: m.director,
     watchProviders: m.watchProviders as unknown as Prisma.InputJsonValue,

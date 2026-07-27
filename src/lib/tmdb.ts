@@ -172,6 +172,7 @@ export async function getTitleDetails(tmdbId: number, mediaType: MediaKind): Pro
     tagline: data.tagline || null,
     runtime,
     genres: (data.genres ?? []).map((g: any) => g.name),
+    spokenLanguages: (data.spoken_languages ?? []).map((l: any) => l.english_name).filter(Boolean),
     cast,
     director,
     tmdbScore: typeof data.vote_average === "number" ? data.vote_average : null,

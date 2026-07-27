@@ -10,6 +10,7 @@ export function TitleHeader({
   numberOfEpisodes,
   director,
   genres,
+  spokenLanguages,
   watchedDate,
 }: {
   title: string;
@@ -23,6 +24,7 @@ export function TitleHeader({
   numberOfEpisodes: number | null;
   director: string | null;
   genres: string[];
+  spokenLanguages: string[];
   watchedDate?: string | null;
 }) {
   const metaParts = [
@@ -57,6 +59,12 @@ export function TitleHeader({
             <div className="mt-2">
               <p className="meta">Director</p>
               <p className="text-sm">{director}</p>
+            </div>
+          )}
+          {spokenLanguages.length > 0 && (
+            <div className="mt-2">
+              <p className="meta">{spokenLanguages.length === 1 ? "Language" : "Languages"}</p>
+              <p className="text-sm">{spokenLanguages.join(", ")}</p>
             </div>
           )}
           <div className="mt-2 flex flex-wrap gap-1">

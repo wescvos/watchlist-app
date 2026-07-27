@@ -12,6 +12,7 @@ interface Title {
   id: string; title: string; year: number | null; posterUrl: string | null; backdropUrl: string | null;
   mediaType: "MOVIE" | "TV"; numberOfSeasons: number | null; numberOfEpisodes: number | null;
   overview: string | null; tagline: string | null; runtime: number | null; genres: string[];
+  spokenLanguages: string[];
   cast: CastMember[]; director: string | null;
   watchProviders: WatchProvider[]; watchLink: string | null;
   tmdbScore: number | null; imdbScore: string | null; rtScore: string | null; metacriticScore: string | null;
@@ -179,6 +180,7 @@ export function TitleDetail({ title }: { title: Title }) {
         numberOfEpisodes={title.numberOfEpisodes}
         director={title.director}
         genres={title.genres}
+        spokenLanguages={title.spokenLanguages}
         watchedDate={status === "WATCHED" && title.watchedAt ? formatWatchedDate(title.watchedAt) : null}
       />
 

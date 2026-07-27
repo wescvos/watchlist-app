@@ -42,6 +42,7 @@ export interface TmdbDetails {
   tagline: string | null;
   runtime: number | null;
   genres: string[];
+  spokenLanguages: string[];
   cast: CastMember[];
   director: string | null;
   tmdbScore: number | null;

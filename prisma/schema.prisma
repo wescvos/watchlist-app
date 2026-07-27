@@ -31,6 +31,7 @@ model Title {
   numberOfSeasons  Int?
   numberOfEpisodes Int?
   genres           String[]
+  spokenLanguages  String[]
   cast             Json      @default("[]")
   director         String?
   watchProviders   Json      @default("[]")
