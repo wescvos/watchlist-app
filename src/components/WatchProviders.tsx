@@ -13,7 +13,7 @@ export function WatchProviders({ providers }: { providers: WatchProvider[] }) {
             <div key={p.name} className="flex w-16 flex-col items-center gap-1">
               {p.logoUrl ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={p.logoUrl} alt={p.name} className="h-10 w-10 rounded-lg object-cover ring-1 ring-black/5 dark:ring-white/10" />
+                <img src={p.logoUrl} alt={p.name} loading="lazy" className="h-10 w-10 rounded-lg object-cover ring-1 ring-black/5 dark:ring-white/10" />
               ) : (
                 <div className="h-10 w-10 rounded-lg bg-gray-100 dark:bg-white/10" />
               )}

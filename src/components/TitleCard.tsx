@@ -28,8 +28,10 @@ export function TitleCard({ t, status }: { t: CardTitle; status: "WANT" | "WATCH
     >
       <div className="relative aspect-[2/3] w-full overflow-hidden rounded-lg bg-gray-200 ring-1 ring-black/5 dark:bg-white/10 dark:ring-white/10">
         {t.posterUrl ? (
+          // w342 is plenty for these ~120px grid tiles (stored URL is w500);
+          // lazy so a long list doesn't eagerly fetch every below-the-fold poster.
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={t.posterUrl} alt={t.title} className="h-full w-full object-cover" />
+          <img src={t.posterUrl.replace("/w500/", "/w342/")} alt={t.title} loading="lazy" className="h-full w-full object-cover" />
         ) : (
           <div className="flex h-full items-center justify-center p-2 text-center meta">
             {t.title}

@@ -38,15 +38,17 @@ export function TitleHeader({
     <div className="relative -mx-4 overflow-hidden">
       {backdropUrl && (
         <div className="absolute inset-0 -z-10 fade-in" aria-hidden="true">
+          {/* w780 is ample for a faint ~20%-opacity background (stored URL is w1280). */}
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src={backdropUrl} alt="" className="h-full w-full object-cover opacity-20 dark:opacity-15" />
+          <img src={backdropUrl.replace("/w1280/", "/w780/")} alt="" className="h-full w-full object-cover opacity-20 dark:opacity-15" />
           <div className="absolute inset-0 bg-gradient-to-b from-transparent to-background" />
         </div>
       )}
       <div className="mt-3 flex gap-4 px-4">
         <div className="h-48 w-32 flex-shrink-0 overflow-hidden rounded-lg bg-gray-200 ring-1 ring-black/5 dark:bg-white/10 dark:ring-white/10">
+          {/* w342 fits this 128px-wide poster (stored URL is w500). */}
           {posterUrl && /* eslint-disable-next-line @next/next/no-img-element */
-            <img src={posterUrl} alt={title} className="h-full w-full object-cover" />}
+            <img src={posterUrl.replace("/w500/", "/w342/")} alt={title} className="h-full w-full object-cover" />}
         </div>
         <div>
           <h1 className="text-xl font-semibold">{title}</h1>
