@@ -121,12 +121,12 @@ function DebugHome(props: {
 }) {
   useEffect(() => {
     console.log(
-      `[home-MOUNT ${props.instanceId}] cacheWANT=${listCache.WANT.titles.length} wantLoaded=${listCache.WANT.loaded} cacheWATCHED=${listCache.WATCHED.titles.length}`,
+      `[home-MOUNT #${props.instanceId} t=${Math.round(performance.now())}ms] cacheWANT=${listCache.WANT.titles.length} wantLoaded=${listCache.WANT.loaded} cacheWATCHED=${listCache.WATCHED.titles.length}`,
     );
   }, [props.instanceId]);
   useEffect(() => {
     console.log(
-      `[home-render ${props.instanceId}] loaded=${props.loaded} titles=${props.titles} display=${props.display} status=${props.status} genre=${props.genre} type=${props.type} sort=${props.sort} skeleton=${props.showSkeleton} filteredEmpty=${props.showFilteredEmpty}`,
+      `[home-render #${props.instanceId} t=${Math.round(performance.now())}ms] loaded=${props.loaded} titles=${props.titles} display=${props.display} status=${props.status} genre=${props.genre} type=${props.type} sort=${props.sort} skeleton=${props.showSkeleton} filteredEmpty=${props.showFilteredEmpty}`,
     );
   });
   return null;
