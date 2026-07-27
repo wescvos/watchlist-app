@@ -44,6 +44,10 @@ export function TitleDetail({ title }: { title: Title }) {
   const [note, setNote] = useState(title.note ?? "");
   const [myRating, setMyRating] = useState<number | null>(title.myRating);
   const [pinned, setPinned] = useState(title.pinned);
+  // Local mirror of the server watchedAt: without router.refresh() the title
+  // prop won't update after mark-watched, so track it here to keep the
+  // "Watched [date]" line correct immediately.
+  const [watchedAt, setWatchedAt] = useState<string | null>(title.watchedAt);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [flash, setFlash] = useState<"rating" | "note" | "refresh" | null>(null);
@@ -73,7 +77,13 @@ export function TitleDetail({ title }: { title: Title }) {
         setError("Couldn't save. Please try again.");
         return false;
       }
-      router.refresh();
+      // No router.refresh() here: it invalidated the Router Cache, which forced
+      // the list route to re-render on back-nav (the flash) and left an
+      // intermediate detail state in history (the double-back). Optimistic
+      // local state already keeps the detail view correct; the list refreshes
+      // itself on return via Home's mount-effect refetch (see below). The
+      // manual refresh() action keeps its router.refresh() — it genuinely needs
+      // fresh server data.
       return true;
     } catch {
       setError("Couldn't save. Please try again.");
@@ -99,13 +109,23 @@ export function TitleDetail({ title }: { title: Title }) {
 
   async function toggleStatus() {
     const prev = status;
+    const prevWatchedAt = watchedAt;
     const next = status === "WANT" ? "WATCHED" : "WANT";
     setStatus(next);
-    // Server clears pinned when a title becomes watched (pinning is want-only);
-    // mirror that locally so the state stays honest without a reload.
-    if (next === "WATCHED") setPinned(false);
+    // Server clears pinned when a title becomes watched (pinning is want-only)
+    // and stamps/clears watchedAt; mirror both locally so the view stays honest
+    // without a reload (we no longer router.refresh() to pull the server value).
+    if (next === "WATCHED") {
+      setPinned(false);
+      setWatchedAt(new Date().toISOString());
+    } else {
+      setWatchedAt(null);
+    }
     const ok = await patch({ status: next });
-    if (!ok) setStatus(prev);
+    if (!ok) {
+      setStatus(prev);
+      setWatchedAt(prevWatchedAt);
+    }
   }
 
   async function togglePin() {
@@ -181,7 +201,7 @@ export function TitleDetail({ title }: { title: Title }) {
         director={title.director}
         genres={title.genres}
         spokenLanguages={title.spokenLanguages}
-        watchedDate={status === "WATCHED" && title.watchedAt ? formatWatchedDate(title.watchedAt) : null}
+        watchedDate={status === "WATCHED" && watchedAt ? formatWatchedDate(watchedAt) : null}
       />
 
       {/* Rating only makes sense once watched — prompt to mark it watched instead. */}
