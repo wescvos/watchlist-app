@@ -77,13 +77,11 @@ export function TitleDetail({ title }: { title: Title }) {
         setError("Couldn't save. Please try again.");
         return false;
       }
-      // No router.refresh() here: it invalidated the Router Cache, which forced
-      // the list route to re-render on back-nav (the flash) and left an
-      // intermediate detail state in history (the double-back). Optimistic
-      // local state already keeps the detail view correct; the list refreshes
-      // itself on return via Home's mount-effect refetch (see below). The
-      // manual refresh() action keeps its router.refresh() — it genuinely needs
-      // fresh server data.
+      // BISECT (temporary): router.refresh() restored here, reverting the
+      // patch()-side removal from 03de1a4, to test whether it was keeping the
+      // back-nav rebuild warm (no flash). Expected to reintroduce the
+      // double-back; that's the experiment. Nothing else changed.
+      router.refresh();
       return true;
     } catch {
       setError("Couldn't save. Please try again.");
