@@ -43,6 +43,7 @@ next-env.d.ts
 
 # scratch / scaffolding notes, never committed
 .superpowers/
+/tasks/
 
 # Per-developer Claude Code local settings
 .claude/settings.local.json
