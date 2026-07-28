@@ -164,6 +164,45 @@ export default function SearchPage() {
     performSearch(term);
   }, [performSearch]);
 
+  // Silently revalidate results restored from the cache. Each result's `library`
+  // field decides both its badge and its link target, so a title added since the
+  // search was run would otherwise still route to /preview instead of /title/:id.
+  // Deliberately no setBusy/setSearched/setSearchError: the cached results stay
+  // rendered the whole time and fresh data swaps in place, so there is no
+  // skeleton and no blank frame. Any failure keeps the cached results.
+  useEffect(() => {
+    const term = searchCache.searchedFor;
+    if (!term || searchCache.results.length === 0) return;
+    // Runs after child effects (UrlQuerySync), so a different ?q may already
+    // have taken over the query — leave that search alone.
+    if (searchedForRef.current !== term) return;
+    const requestIdAtStart = requestIdRef.current;
+    let ignore = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/search?q=${encodeURIComponent(term)}`);
+        if (!res.ok) return; // fail quietly
+        const data: Result[] = await res.json();
+        if (ignore) return;
+        // Never overwrite a newer search (typing, submit, clear) that started
+        // while this was in flight.
+        if (requestIdRef.current !== requestIdAtStart) return;
+        if (searchedForRef.current !== term) return;
+        // An empty response for a term that previously had results is far more
+        // likely an upstream hiccup than a real change; blanking a populated
+        // list would be the exact flash we just removed. Keep what we have.
+        if (data.length === 0) return;
+        setResults(data);
+        searchCache.results = data;
+      } catch {
+        // Fail quietly: the cached results stay on screen.
+      }
+    })();
+    return () => {
+      ignore = true;
+    };
+  }, []);
+
   // Live search: fire once, ~350ms after typing stops, for queries of 2+
   // characters. The URL is synced when the search fires (not per keystroke),
   // via replace, so history never fills with per-character entries.

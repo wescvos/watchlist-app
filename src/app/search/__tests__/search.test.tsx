@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, act } from "@testing-library/react";
 import SearchPage from "@/app/search/page";
 import { listCache, emptyListState, type Status } from "@/lib/listCache";
-import { resetSearchCache } from "@/lib/searchCache";
+import { searchCache, resetSearchCache } from "@/lib/searchCache";
 import type { CardTitle } from "@/components/TitleCard";
 
 // The router object must be a single stable instance, matching the real
@@ -249,5 +249,74 @@ describe("poster wall", () => {
     const tiles = Array.from(container.querySelectorAll("img")).map((img) => img.getAttribute("src"));
     expect(tiles).toEqual(["https://image.tmdb.org/t/p/w185/cold.jpg"]);
     expect(titlesCalls).toEqual(["WANT", "WATCHED"]);
+  });
+});
+
+// A remount (Back from a title page) restores results from searchCache. Those
+// carry a `library` field that drives the link target, so it must be refreshed —
+// silently, without ever clearing what's on screen.
+describe("restored results revalidate silently", () => {
+  function seedCache(results: unknown[]) {
+    searchCache.q = "dune";
+    searchCache.searchedFor = "dune";
+    searchCache.searched = true;
+    searchCache.results = results as never;
+  }
+
+  const linkHrefs = (container: HTMLElement) =>
+    Array.from(container.querySelectorAll("a")).map((a) => a.getAttribute("href"));
+
+  it("refreshes a stale library field so the link points at the title page", async () => {
+    // Cached copy predates the add, so library is still null → /preview/...
+    seedCache([result(1, "Dune")]);
+    installFetch({
+      searchResults: () => [{ ...result(1, "Dune"), library: { id: "abc", status: "WANT" } }],
+    });
+    const { container } = render(<SearchPage />);
+    // Before the revalidate lands, the cached result is already on screen.
+    expect(linkHrefs(container)).toContain("/preview/movie/1");
+    await flush();
+    expect(linkHrefs(container)).toContain("/title/abc");
+    expect(screen.getByText("On list")).toBeTruthy();
+  });
+
+  it("never blanks the list: keeps cached results when the refetch fails", async () => {
+    seedCache([result(1, "Dune")]);
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, json: async () => [] })) as never);
+    const { container } = render(<SearchPage />);
+    await flush();
+    expect(screen.getByText("Dune")).toBeTruthy();
+    expect(linkHrefs(container)).toContain("/preview/movie/1");
+  });
+
+  it("never blanks the list: ignores an empty response for a populated query", async () => {
+    seedCache([result(1, "Dune")]);
+    installFetch({ searchResults: () => [] });
+    render(<SearchPage />);
+    await flush();
+    expect(screen.getByText("Dune")).toBeTruthy();
+  });
+
+  it("does not revalidate on a cold load with no cached results", async () => {
+    const { searchCalls } = installFetch();
+    render(<SearchPage />);
+    await flush();
+    expect(searchCalls).toEqual([]);
+  });
+
+  it("does not overwrite a newer search typed while the revalidate is in flight", async () => {
+    seedCache([result(1, "Dune")]);
+    const { resolve } = installFetch({ deferSearch: true });
+    render(<SearchPage />);
+    // User types a new query before the background revalidate resolves.
+    type("arrival");
+    await advance(1000);
+    resolve("arrival", [result(2, "Arrival")]);
+    await flush();
+    // Now the stale revalidate for "dune" comes back — it must be discarded.
+    resolve("dune", [result(1, "Dune")]);
+    await flush();
+    expect(screen.getByText("Arrival")).toBeTruthy();
+    expect(screen.queryByText("Dune")).toBeNull();
   });
 });
