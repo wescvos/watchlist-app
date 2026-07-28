@@ -77,11 +77,15 @@ export function TitleDetail({ title }: { title: Title }) {
         setError("Couldn't save. Please try again.");
         return false;
       }
-      // BISECT (temporary): router.refresh() restored here, reverting the
-      // patch()-side removal from 03de1a4, to test whether it was keeping the
-      // back-nav rebuild warm (no flash). Expected to reintroduce the
-      // double-back; that's the experiment. Nothing else changed.
-      router.refresh();
+      // Deliberately no router.refresh() here. It pushed a new history entry's
+      // worth of RSC state, so Back needed two swipes to leave the detail page.
+      // Local state (status/note/myRating/pinned/watchedAt) already mirrors what
+      // the server just persisted, and Home refetches its lists on mount, so the
+      // list still reflects the change on return. The manual refresh() action
+      // below keeps its router.refresh() — that one genuinely wants fresh RSC
+      // data. Bisect confirmed this call is flash-neutral: restoring it did not
+      // fix the back-nav flash, which had two other causes (lazy posters on the
+      // home grid, local-useState results on search).
       return true;
     } catch {
       setError("Couldn't save. Please try again.");

@@ -29,9 +29,11 @@ export function TitleCard({ t, status }: { t: CardTitle; status: "WANT" | "WATCH
       <div className="relative aspect-[2/3] w-full overflow-hidden rounded-lg bg-gray-200 ring-1 ring-black/5 dark:bg-white/10 dark:ring-white/10">
         {t.posterUrl ? (
           // w342 is plenty for these ~120px grid tiles (stored URL is w500).
-          // BISECT (temporary): loading="lazy" removed to test whether it's what
-          // blanks the grid on back-nav remount (lazy defers the load a frame
-          // past layout). Reverts that part of 42cb441.
+          // No loading="lazy" on purpose: bisect proved it was what blanked the
+          // grid on back-nav (lazy defers the load a frame past layout, so a
+          // remount paints empty tiles first). Don't reintroduce it here — if
+          // cold-load cost becomes an issue, make eagerness a prop so only the
+          // above-the-fold rows are eager.
           // eslint-disable-next-line @next/next/no-img-element
           <img src={t.posterUrl.replace("/w500/", "/w342/")} alt={t.title} className="h-full w-full object-cover" />
         ) : (
