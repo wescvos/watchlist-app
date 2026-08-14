@@ -15,6 +15,7 @@ This version has breaking changes — APIs, conventions, and file structure may 
 
 - Run `tsc`, `eslint`, `build`, and tests as SEPARATE gated steps that must all pass BEFORE pushing.
 - Never chain verify-and-push in one command. A mid-chain `grep` exiting 0 once let a broken build reach prod.
+- After deleting or renaming routes, run `next build` before trusting `tsc`: stale `.next/types/validator.ts` still imports removed routes and fails type-check spuriously.
 - Changes are tested on the LIVE deployed site, so once verify is green, commit and push immediately. Never gate a push on a check that can only happen after the push.
 - Before trusting a live test, confirm the Vercel deploy is Ready and hard-reload the PWA. Stale service-worker bundles cause false results.
 
