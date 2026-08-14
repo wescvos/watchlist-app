@@ -1,9 +1,10 @@
 import type { SearchResult } from "@/lib/types";
 
-// Title-to-TMDb disambiguation, shared by the Google Takeout import
-// (scripts/import-google-takeout.ts) and the Recommended feature's suggestion
-// resolver. Extracted verbatim from the import script so the two paths use one
-// matcher and cannot drift; behaviour is unchanged.
+// Title-to-TMDb disambiguation, used by the Google Takeout import
+// (scripts/import-google-takeout.ts). Extracted verbatim from that script so
+// any second caller shares one matcher rather than drifting; behaviour is
+// unchanged. The other caller was the removed For You suggestion resolver, so
+// the import script is currently the only consumer.
 
 export function normalize(s: string): string {
   return s

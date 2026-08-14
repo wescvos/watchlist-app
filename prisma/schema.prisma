@@ -53,6 +53,9 @@ model Title {
   @@unique([tmdbId, mediaType])
 }
 
+// RETAINED INTENTIONALLY, no longer read by any code. The For You feature that
+// owned these two tables was removed; dropping them is a separate later cleanup
+// so a feature change never carries a destructive migration.
 model RecommendationSet {
   id          String   @id @default(cuid())
   suggestions Json     @default("[]")
@@ -63,6 +66,7 @@ model RecommendationSet {
   @@index([generatedAt])
 }
 
+// Retained intentionally alongside RecommendationSet; see the note above.
 model DismissedTitle {
   id          String    @id @default(cuid())
   tmdbId      Int
