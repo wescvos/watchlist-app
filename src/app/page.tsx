@@ -1,11 +1,12 @@
 "use client";
-import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ListToggle } from "@/components/ListToggle";
 import { TitleCard, type CardTitle } from "@/components/TitleCard";
 import type { MediaKind } from "@/lib/types";
 import { listCache, type ListState, type Status } from "@/lib/listCache";
+import { hydrateListCache, persistLists } from "@/lib/listPersist";
 
 // Isolated so only this reads the URL — keeps the rest of the page server-rendered
 // instead of the whole tree bailing to client-only rendering for useSearchParams.
@@ -112,6 +113,13 @@ export default function Home() {
     setListsState((prev) => {
       const next = updater(prev);
       Object.assign(listCache, next);
+      // Persist only when the titles themselves changed, so the fetching/error
+      // flag updates don't re-serialize 130 KB for nothing. Writing from inside
+      // the updater matches the Object.assign above, and persistLists is
+      // idempotent, so a StrictMode double invocation is harmless.
+      if (next.WANT.titles !== prev.WANT.titles || next.WATCHED.titles !== prev.WATCHED.titles) {
+        persistLists(next);
+      }
       return next;
     });
   }, []);
@@ -193,6 +201,35 @@ export default function Home() {
       ignore = true;
     };
   }, [setLists]);
+
+  // Seed from localStorage on a cold launch, BEFORE the browser paints.
+  //
+  // A layout effect rather than the useState initializer above: reading
+  // localStorage during render would make the client's first output disagree
+  // with the prerendered HTML (a hydration mismatch). A layout effect runs after
+  // hydration but before paint, so the skeleton is never actually drawn. A
+  // passive effect would work too, but would paint one skeleton frame first.
+  //
+  // Uses setListsState directly, not setLists: hydrateListCache has already
+  // updated the singleton, and going through setLists would persist the data we
+  // just read straight back to disk.
+  //
+  // What this does NOT remove is the wait for JS to download and hydrate, since
+  // the static shell's skeleton is what's on screen until then. It removes the
+  // API round trip that used to follow hydration, which is what delayed the
+  // posters.
+  useLayoutEffect(() => {
+    if (!hydrateListCache()) return;
+    // Seeding React state from an external store on mount has exactly two
+    // sanctioned shapes: this, or useSyncExternalStore. The lint rule below
+    // objects to cascading renders, and this cascade is one extra render, once
+    // per mount, before paint. useSyncExternalStore is the cleaner long-term
+    // answer, but it would mean moving all of `lists` into an external store,
+    // i.e. rewriting the state machinery the poster-flash fixes live in, for no
+    // user-visible gain. Deliberate exception, not an oversight.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setListsState({ ...listCache });
+  }, []);
 
   // Load both lists once so tab counts and the inactive tab's grid are ready before it's opened.
   useEffect(() => {

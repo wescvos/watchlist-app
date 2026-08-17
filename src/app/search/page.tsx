@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { BackLink } from "@/components/BackLink";
 import type { SearchResultWithLibrary } from "@/lib/types";
 import { listCache } from "@/lib/listCache";
+import { hydrateListCache } from "@/lib/listPersist";
 import { searchCache, resetSearchCache } from "@/lib/searchCache";
 
 type Result = SearchResultWithLibrary;
@@ -67,6 +68,24 @@ export default function SearchPage() {
   const inputRef = useRef<HTMLInputElement>(null);
   const headerRef = useRef<HTMLDivElement>(null);
   const [headerHeight, setHeaderHeight] = useState(0);
+
+  // Cold launch straight into Search (rather than via Home) has an empty
+  // listCache, so seed it from disk before paint. Same reasoning as Home's
+  // layout effect: reading localStorage during render would be a hydration
+  // mismatch, and a passive effect would paint an empty wall first. Setting the
+  // ref here is what stops the fetch effect below from re-fetching, and layout
+  // effects run before passive ones, so the ordering is guaranteed.
+  useLayoutEffect(() => {
+    if (hadCachedWallPosters.current) return;
+    if (!hydrateListCache()) return;
+    const posters = cachedWallPosters();
+    if (posters.length === 0) return;
+    hadCachedWallPosters.current = true;
+    // Same trade as Home's seeding effect: one bounded pre-paint render rather
+    // than moving the wall's state into an external store. See the comment there.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setWallPosters(posters);
+  }, []);
 
   // Belt-and-suspenders alongside the native autoFocus attribute below: some
   // mobile browsers only reliably open the keyboard from an imperative focus().
