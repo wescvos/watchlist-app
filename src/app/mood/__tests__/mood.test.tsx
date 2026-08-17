@@ -244,6 +244,78 @@ describe("/mood picker", () => {
     expect(screen.getByText("Weird").closest("a")!.querySelector("img")).toHaveAttribute("src", tileSrc(2));
   });
 
+  // A title can be the highest-rated in several moods at once, which is
+  // multi-tagging working correctly. Left unconstrained it showed the SAME image
+  // on several tiles, so the assignment is global rather than per mood.
+  it("never shows the same poster on two tiles", async () => {
+    // One standout title carrying four moods, plus a weaker alternative in each.
+    mock(prisma.title.findMany).mockResolvedValue([
+      pickerRow(["Light & funny", "Feel-good", "Weird", "Beautiful & calm"], true, {
+        posterUrl: poster(0),
+        imdbScore: "9.5",
+      }),
+      pickerRow(["Light & funny"], true, { posterUrl: poster(1), imdbScore: "7.0" }),
+      pickerRow(["Feel-good"], true, { posterUrl: poster(2), imdbScore: "7.0" }),
+      pickerRow(["Weird"], true, { posterUrl: poster(3), imdbScore: "7.0" }),
+      pickerRow(["Beautiful & calm"], true, { posterUrl: poster(4), imdbScore: "7.0" }),
+    ]);
+
+    const { container } = render(await MoodPage());
+
+    const srcs = Array.from(container.querySelectorAll("img")).map((i) => i.getAttribute("src"));
+    expect(srcs).toHaveLength(4);
+    expect(new Set(srcs).size).toBe(4);
+  });
+
+  it("gives a contested title to the scarcest mood, not the abundant one", async () => {
+    // The 9.5 is the best candidate for both moods. "Scary" has only that one;
+    // "Dark & heavy" has three. Scarcest gets first refusal, so Scary keeps it
+    // and Dark & heavy falls to its next best.
+    mock(prisma.title.findMany).mockResolvedValue([
+      pickerRow(["Scary", "Dark & heavy"], true, { posterUrl: poster(0), imdbScore: "9.5" }),
+      pickerRow(["Dark & heavy"], true, { posterUrl: poster(1), imdbScore: "8.0" }),
+      pickerRow(["Dark & heavy"], true, { posterUrl: poster(2), imdbScore: "7.0" }),
+    ]);
+
+    render(await MoodPage());
+
+    expect(screen.getByText("Scary").closest("a")!.querySelector("img")).toHaveAttribute("src", tileSrc(0));
+    expect(screen.getByText("Dark & heavy").closest("a")!.querySelector("img")).toHaveAttribute("src", tileSrc(1));
+  });
+
+  it("breaks count ties by canonical mood order, so assignment stays deterministic", async () => {
+    // Both moods have exactly one candidate, the same title. Light & funny comes
+    // first in canonical order, so it wins; Feel-good falls back to a duplicate
+    // rather than a blank tile.
+    mock(prisma.title.findMany).mockResolvedValue([
+      pickerRow(["Light & funny", "Feel-good"], true, { posterUrl: poster(0), imdbScore: "8.0" }),
+    ]);
+
+    render(await MoodPage());
+
+    expect(screen.getByText("Light & funny").closest("a")!.querySelector("img")).toHaveAttribute("src", tileSrc(0));
+    // Fallback: a duplicate beats a hole.
+    expect(screen.getByText("Feel-good").closest("a")!.querySelector("img")).toHaveAttribute("src", tileSrc(0));
+  });
+
+  it("keeps the assignment stable when rows arrive in a different order", async () => {
+    const rows = [
+      pickerRow(["Light & funny", "Feel-good"], true, { posterUrl: poster(0), imdbScore: "9.5" }),
+      pickerRow(["Light & funny"], true, { posterUrl: poster(1), imdbScore: "7.0" }),
+      pickerRow(["Feel-good"], true, { posterUrl: poster(2), imdbScore: "7.0" }),
+      pickerRow(["Weird"], true, { posterUrl: poster(3), imdbScore: "7.0" }),
+    ];
+    const assignment = async (input: typeof rows) => {
+      mock(prisma.title.findMany).mockResolvedValue(input);
+      const { container } = render(await MoodPage());
+      return Array.from(container.querySelectorAll("a[href^='/mood/']"))
+        .map((a) => `${a.textContent}:${a.querySelector("img")?.getAttribute("src") ?? "none"}`)
+        .join("|");
+    };
+
+    expect(await assignment(rows)).toBe(await assignment([...rows].reverse()));
+  });
+
   it("renders no poster at all when a mood has no titles", async () => {
     mock(prisma.title.findMany).mockResolvedValue([
       pickerRow(["Weird"], true, { posterUrl: poster(1) }),

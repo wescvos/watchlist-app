@@ -24,16 +24,9 @@ interface PickerTitle {
 }
 
 /**
- * The poster that represents a mood: its highest-rated title, falling back to
- * the most recently added when ratings tie or are missing.
- *
- * DETERMINISTIC BY DESIGN. A tile that reshuffles between visits is noise rather
- * than delight, so this is a total order over the mood's titles with no
- * randomness and no dependence on query order.
- *
- * `imdbScore` is a STRING column ("7.5"), so it is compared as a number here.
- * Sorting it lexicographically would rank "9.0" above "10.0", which is the one
- * case where the string order and the real order disagree.
+ * `imdbScore` is a STRING column ("7.5"), so it is compared as a number.
+ * Sorting it lexicographically would rank "9.0" above "10.0", the one case
+ * where string order and real order disagree.
  */
 function ratingOf(t: PickerTitle): number {
   if (t.imdbScore == null) return -1;
@@ -41,23 +34,72 @@ function ratingOf(t: PickerTitle): number {
   return Number.isFinite(n) ? n : -1;
 }
 
-function posterFor(titles: PickerTitle[], mood: string): string | null {
-  const candidates = titles.filter((t) => t.moods.includes(mood) && t.posterUrl);
-
-  // A TOTAL order, so the result cannot depend on the order Postgres happened
-  // to return rows in (the query has no ORDER BY, and without one that order is
-  // not guaranteed). Rating, then recency, then the URL itself as a final
-  // tie-break, which is arbitrary but stable.
-  candidates.sort(
-    (a, b) =>
-      ratingOf(b) - ratingOf(a) ||
-      b.addedAt.getTime() - a.addedAt.getTime() ||
-      a.posterUrl!.localeCompare(b.posterUrl!),
+/**
+ * A TOTAL order over candidates, so nothing depends on the order Postgres
+ * happened to return rows in (the query has no ORDER BY, and without one that
+ * order is not guaranteed). Rating, then recency, then the URL itself as a
+ * final tie-break: arbitrary, but stable.
+ */
+function compareCandidates(a: PickerTitle, b: PickerTitle): number {
+  return (
+    ratingOf(b) - ratingOf(a) ||
+    b.addedAt.getTime() - a.addedAt.getTime() ||
+    a.posterUrl!.localeCompare(b.posterUrl!)
   );
+}
 
-  // w342 for a ~170px tile at 2x (stored URL is w500), same size-swap trick the
-  // cards use.
-  return candidates[0]?.posterUrl?.replace("/w500/", "/w342/") ?? null;
+/**
+ * Assign one background poster per mood, with NO TITLE USED TWICE.
+ *
+ * Picking each mood's best title independently produced visible collisions:
+ * multi-tagging means one title can be the highest-rated in several moods at
+ * once, so "Light & funny" and "Feel-good" ended up showing the same image.
+ * That is the tagging working correctly and the pick being unconstrained, so the
+ * fix belongs here.
+ *
+ * SCARCEST MOOD FIRST. Moods are processed in ascending order of how many Want
+ * titles they have, so a mood with 28 candidates gets first refusal before one
+ * with 105 can strip its only options. (Ordering uses the mood's full count,
+ * the same number the tile displays, which makes the behaviour explainable;
+ * counting only titles that have posters would give a near-identical order.)
+ * Count ties break on canonical mood order, so the whole assignment is
+ * deterministic: the same rows always produce the same tiles.
+ */
+function assignPosters(titles: PickerTitle[], counts: Map<string, number>): Map<string, string> {
+  const candidates = new Map<string, PickerTitle[]>();
+  for (const mood of MOODS) {
+    const list = titles.filter((t) => t.moods.includes(mood.label) && t.posterUrl);
+    list.sort(compareCandidates);
+    candidates.set(mood.label, list);
+  }
+
+  const order = MOODS.map((mood, index) => ({
+    label: mood.label,
+    count: counts.get(mood.label) ?? 0,
+    index,
+  }))
+    // A mood with no titles keeps the plain dash tile, so it takes no poster.
+    .filter((m) => m.count > 0)
+    .sort((a, b) => a.count - b.count || a.index - b.index);
+
+  const used = new Set<string>();
+  const chosen = new Map<string, string>();
+
+  for (const { label } of order) {
+    const list = candidates.get(label) ?? [];
+    // Highest-rated unused title. If every candidate is already spoken for,
+    // reuse the top one rather than leaving a hole: a duplicate reads better
+    // than a blank tile. With 327 titles across 12 moods this should never
+    // fire, but it cannot be allowed to produce an empty tile.
+    const pick = list.find((t) => !used.has(t.posterUrl!)) ?? list[0];
+    if (!pick?.posterUrl) continue;
+    used.add(pick.posterUrl);
+    // w342 for a ~170px tile at 2x (stored URL is w500), same size-swap trick
+    // the cards use.
+    chosen.set(label, pick.posterUrl.replace("/w500/", "/w342/"));
+  }
+
+  return chosen;
 }
 
 export default async function MoodPage() {
@@ -85,6 +127,9 @@ export default async function MoodPage() {
   // rest of this screen: the Watched list is not browsable by mood yet, so its
   // untagged titles are not missing from anything here.
   const untagged = titles.filter((t) => t.moodsTaggedAt == null).length;
+  // Computed once for the whole grid, because the assignment is global: which
+  // poster a tile gets depends on what the other tiles took.
+  const posters = assignPosters(titles, counts);
 
   return (
     <main className="mx-auto w-full max-w-2xl p-4 pb-24">
@@ -100,7 +145,7 @@ export default async function MoodPage() {
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
         {MOODS.map((mood) => {
           const count = counts.get(mood.label) ?? 0;
-          const poster = count > 0 ? posterFor(titles, mood.label) : null;
+          const poster = posters.get(mood.label) ?? null;
           return (
             <Link
               key={mood.slug}
