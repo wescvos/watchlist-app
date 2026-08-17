@@ -15,9 +15,24 @@ import { MOODS, MOOD_LABELS } from "@/lib/moods";
 const mock = (fn: unknown) => fn as Mock;
 
 /** A row shaped as the picker's query selects it. */
-function pickerRow(moods: string[], tagged = true) {
-  return { moods, moodsTaggedAt: tagged ? new Date("2026-08-17") : null };
+function pickerRow(
+  moods: string[],
+  tagged = true,
+  extra: { posterUrl?: string | null; imdbScore?: string | null; addedAt?: Date } = {},
+) {
+  return {
+    moods,
+    moodsTaggedAt: tagged ? new Date("2026-08-17") : null,
+    posterUrl: extra.posterUrl ?? null,
+    imdbScore: extra.imdbScore ?? null,
+    addedAt: extra.addedAt ?? new Date("2026-01-01"),
+  };
 }
+
+/** A poster URL as TMDb stores it, at the size the DB holds. */
+const poster = (n: number) => `https://image.tmdb.org/t/p/w500/p${n}.jpg`;
+/** The size the picker swaps down to for its tile backgrounds. */
+const tileSrc = (n: number) => poster(n).replace("/w500/", "/w342/");
 
 /** A row shaped as the grid's query selects it. */
 function cardRow(i: number, overrides: Record<string, unknown> = {}) {
@@ -83,7 +98,10 @@ describe("/mood picker", () => {
 
     const scary = screen.getByText("Scary").closest("a")!;
     expect(scary).toBeInTheDocument();
-    expect(scary).toHaveTextContent("none");
+    // A quiet dash, not the word "none", which read as an error rather than an
+    // empty category.
+    expect(scary).toHaveTextContent("–");
+    expect(scary.textContent).not.toMatch(/none/i);
     expect(scary.className).toContain("opacity-55");
     expect(screen.getByText("Weird").closest("a")!.className).not.toContain("opacity-55");
   });
@@ -116,6 +134,148 @@ describe("/mood picker", () => {
     render(await MoodPage());
 
     expect(screen.queryByText(/not yet tagged/)).not.toBeInTheDocument();
+  });
+
+  it("gives each non-empty mood a poster from one of its own titles", async () => {
+    mock(prisma.title.findMany).mockResolvedValue([
+      pickerRow(["Weird"], true, { posterUrl: poster(1), imdbScore: "7.0" }),
+      pickerRow(["Scary"], true, { posterUrl: poster(2), imdbScore: "6.0" }),
+    ]);
+
+    const { container } = render(await MoodPage());
+
+    expect(screen.getByText("Weird").closest("a")!.querySelector("img")).toHaveAttribute("src", tileSrc(1));
+    expect(screen.getByText("Scary").closest("a")!.querySelector("img")).toHaveAttribute("src", tileSrc(2));
+    // Only the two moods with titles get one.
+    expect(container.querySelectorAll("img")).toHaveLength(2);
+  });
+
+  it("picks the highest-rated title's poster, deterministically", async () => {
+    mock(prisma.title.findMany).mockResolvedValue([
+      pickerRow(["Weird"], true, { posterUrl: poster(1), imdbScore: "6.1" }),
+      pickerRow(["Weird"], true, { posterUrl: poster(2), imdbScore: "8.4" }),
+      pickerRow(["Weird"], true, { posterUrl: poster(3), imdbScore: "7.9" }),
+    ]);
+
+    render(await MoodPage());
+
+    expect(screen.getByText("Weird").closest("a")!.querySelector("img")).toHaveAttribute("src", tileSrc(2));
+  });
+
+  it("compares ratings numerically, so 10.0 beats 9.0", async () => {
+    // imdbScore is a string column, and lexicographically "9.0" sorts above
+    // "10.0". This is the one case where string order and real order disagree.
+    mock(prisma.title.findMany).mockResolvedValue([
+      pickerRow(["Weird"], true, { posterUrl: poster(1), imdbScore: "9.0" }),
+      pickerRow(["Weird"], true, { posterUrl: poster(2), imdbScore: "10.0" }),
+    ]);
+
+    render(await MoodPage());
+
+    expect(screen.getByText("Weird").closest("a")!.querySelector("img")).toHaveAttribute("src", tileSrc(2));
+  });
+
+  it("falls back to the most recently added when ratings tie or are missing", async () => {
+    mock(prisma.title.findMany).mockResolvedValue([
+      pickerRow(["Weird"], true, { posterUrl: poster(1), imdbScore: null, addedAt: new Date("2026-01-01") }),
+      pickerRow(["Weird"], true, { posterUrl: poster(2), imdbScore: null, addedAt: new Date("2026-06-01") }),
+    ]);
+
+    render(await MoodPage());
+
+    expect(screen.getByText("Weird").closest("a")!.querySelector("img")).toHaveAttribute("src", tileSrc(2));
+  });
+
+  it("prefers a rated title over an unrated one", async () => {
+    mock(prisma.title.findMany).mockResolvedValue([
+      pickerRow(["Weird"], true, { posterUrl: poster(1), imdbScore: null, addedAt: new Date("2026-06-01") }),
+      pickerRow(["Weird"], true, { posterUrl: poster(2), imdbScore: "5.0", addedAt: new Date("2026-01-01") }),
+    ]);
+
+    render(await MoodPage());
+
+    expect(screen.getByText("Weird").closest("a")!.querySelector("img")).toHaveAttribute("src", tileSrc(2));
+  });
+
+  it("renders the same poster on repeated renders, so tiles do not reshuffle", async () => {
+    // Every candidate rated identically: the tie-break must still be total, or
+    // the tile would change between visits.
+    mock(prisma.title.findMany).mockResolvedValue([
+      pickerRow(["Weird"], true, { posterUrl: poster(1), imdbScore: "8.0", addedAt: new Date("2026-02-01") }),
+      pickerRow(["Weird"], true, { posterUrl: poster(2), imdbScore: "8.0", addedAt: new Date("2026-03-01") }),
+      pickerRow(["Weird"], true, { posterUrl: poster(3), imdbScore: "8.0", addedAt: new Date("2026-01-01") }),
+    ]);
+
+    const first = render(await MoodPage()).container.querySelector("img")!.getAttribute("src");
+    const second = render(await MoodPage()).container.querySelector("img")!.getAttribute("src");
+
+    expect(first).toBe(second);
+    expect(first).toBe(tileSrc(2));
+  });
+
+  it("stays stable when rating AND date both tie, whatever order rows arrive in", async () => {
+    // The query has no ORDER BY, so Postgres row order is not guaranteed. With
+    // an identical rating and addedAt, only a further tie-break keeps the tile
+    // from flipping between visits.
+    const same = { imdbScore: "8.0", addedAt: new Date("2026-02-01") };
+    const rows = [
+      pickerRow(["Weird"], true, { posterUrl: poster(1), ...same }),
+      pickerRow(["Weird"], true, { posterUrl: poster(2), ...same }),
+      pickerRow(["Weird"], true, { posterUrl: poster(3), ...same }),
+    ];
+
+    mock(prisma.title.findMany).mockResolvedValue(rows);
+    const forward = render(await MoodPage()).container.querySelector("img")!.getAttribute("src");
+
+    mock(prisma.title.findMany).mockResolvedValue([...rows].reverse());
+    const reversed = render(await MoodPage()).container.querySelector("img")!.getAttribute("src");
+
+    expect(forward).toBe(reversed);
+  });
+
+  it("skips titles with no poster rather than rendering a broken image", async () => {
+    mock(prisma.title.findMany).mockResolvedValue([
+      pickerRow(["Weird"], true, { posterUrl: null, imdbScore: "9.9" }),
+      pickerRow(["Weird"], true, { posterUrl: poster(2), imdbScore: "4.0" }),
+    ]);
+
+    render(await MoodPage());
+
+    expect(screen.getByText("Weird").closest("a")!.querySelector("img")).toHaveAttribute("src", tileSrc(2));
+  });
+
+  it("renders no poster at all when a mood has no titles", async () => {
+    mock(prisma.title.findMany).mockResolvedValue([
+      pickerRow(["Weird"], true, { posterUrl: poster(1) }),
+    ]);
+
+    render(await MoodPage());
+
+    expect(screen.getByText("Scary").closest("a")!.querySelector("img")).toBeNull();
+  });
+
+  // Same regression guard family as the results grid, plus the poster-wall
+  // lesson: a uniform scrim rather than per-image opacity is what keeps light
+  // and dark posters equally muted.
+  it("renders posters eagerly, with a uniform scrim and no fade-in", async () => {
+    mock(prisma.title.findMany).mockResolvedValue([
+      pickerRow(["Weird"], true, { posterUrl: poster(1) }),
+      pickerRow(["Scary"], true, { posterUrl: poster(2) }),
+    ]);
+
+    const { container } = render(await MoodPage());
+
+    const html = container.innerHTML;
+    expect(html).not.toContain('loading="lazy"');
+    expect(container.querySelectorAll("img[loading]")).toHaveLength(0);
+    expect(html).not.toContain("fade-in");
+    // The scrim is a flat overlay, so no image carries an opacity class itself.
+    for (const img of container.querySelectorAll("img")) {
+      expect(img.className).not.toMatch(/opacity-/);
+    }
+    expect(html).toContain("bg-background/80");
+    // The images really are present, so none of the above passes vacuously.
+    expect(container.querySelectorAll("img")).toHaveLength(2);
   });
 
   it("singularises the untagged count", async () => {
