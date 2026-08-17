@@ -17,6 +17,12 @@
 // `responseFormat` is a separate surface we deliberately do not use.)
 // To pin a concrete version instead of the alias, gemini-3.5-flash is verified
 // working with the same request shape.
+//
+// THE ALIAS MOVES, and that is the point of using it. As of 2026-08-17 the
+// model list includes Gemini 3.7 Flash, so this may now resolve to something
+// newer than the 3.6 it hit before. Behaviour can therefore shift under us
+// without a code change: if output quality or token usage moves unexpectedly,
+// check what the alias currently resolves to before hunting for a bug here.
 export const GEMINI_MODEL = "gemini-flash-latest";
 
 const ENDPOINT = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent`;

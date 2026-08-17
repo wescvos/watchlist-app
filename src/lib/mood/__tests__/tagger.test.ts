@@ -21,6 +21,7 @@ import { MOOD_LABELS } from "@/lib/moods";
 import {
   TAG_BATCH_SIZE,
   OVERVIEW_MAX_CHARS,
+  INTER_REQUEST_DELAY_MS,
   buildTagPrompt,
   parseMoodTaggings,
   truncateOverview,
@@ -277,7 +278,7 @@ describe("tagTitles", () => {
     );
     mock(generateJson).mockResolvedValue([]);
 
-    await tagTitles(Array.from({ length: 45 }, (_, i) => `id${i}`));
+    await tagTitles(Array.from({ length: 45 }, (_, i) => `id${i}`), { delayMs: 0 });
 
     expect(generateJson).toHaveBeenCalledTimes(3);
     const sizes = promptsSent().map((p) => (p.match(/"index":/g) ?? []).length);
@@ -291,7 +292,7 @@ describe("tagTitles", () => {
     );
     mock(generateJson).mockResolvedValue([]);
 
-    await tagTitles(Array.from({ length: 20 }, (_, i) => `id${i}`));
+    await tagTitles(Array.from({ length: 20 }, (_, i) => `id${i}`), { delayMs: 0 });
     expect(generateJson).toHaveBeenCalledTimes(1);
   });
 
@@ -301,7 +302,7 @@ describe("tagTitles", () => {
     );
     mock(generateJson).mockResolvedValue([]);
 
-    await tagTitles(Array.from({ length: 25 }, (_, i) => `id${i}`));
+    await tagTitles(Array.from({ length: 25 }, (_, i) => `id${i}`), { delayMs: 0 });
 
     // Compact JSON, deliberately: the payload is spent tokens, and this runs
     // against a 20-request daily budget.
@@ -316,7 +317,7 @@ describe("tagTitles", () => {
     mock(prisma.title.findMany).mockResolvedValue([row(0)]);
     mock(generateJson).mockResolvedValue([]);
 
-    await tagTitles(["id0"]);
+    await tagTitles(["id0"], { delayMs: 0 });
 
     const arg = mock(prisma.title.findMany).mock.calls[0][0];
     expect(arg.select).toBeDefined();
@@ -331,7 +332,7 @@ describe("tagTitles", () => {
       { index: 0, title: "Parasite", moods: ["Dark & heavy"] },
     ]);
 
-    const result = await tagTitles(["id0"]);
+    const result = await tagTitles(["id0"], { delayMs: 0 });
 
     const arg = mock(prisma.title.update).mock.calls[0][0];
     expect(arg.where).toEqual({ id: "id0" });
@@ -344,7 +345,7 @@ describe("tagTitles", () => {
     mock(prisma.title.findMany).mockResolvedValue([row(0, { title: "Parasite" })]);
     mock(generateJson).mockResolvedValue([{ index: 0, title: "Parasite", moods: [] }]);
 
-    await tagTitles(["id0"]);
+    await tagTitles(["id0"], { delayMs: 0 });
 
     const arg = mock(prisma.title.update).mock.calls[0][0];
     expect(arg.data.moods).toEqual([]);
@@ -359,7 +360,7 @@ describe("tagTitles", () => {
       .mockRejectedValueOnce(new GeminiError("boom", "failure"))
       .mockResolvedValueOnce([{ index: 0, title: "Film 20", moods: ["Weird"] }]);
 
-    const result = await tagTitles(Array.from({ length: 25 }, (_, i) => `id${i}`));
+    const result = await tagTitles(Array.from({ length: 25 }, (_, i) => `id${i}`), { delayMs: 0 });
 
     expect(generateJson).toHaveBeenCalledTimes(2);
     expect(result.failed).toBe(20);
@@ -375,10 +376,61 @@ describe("tagTitles", () => {
     );
     mock(generateJson).mockRejectedValue(new GeminiError("cap", "rate_limit"));
 
-    await expect(tagTitles(Array.from({ length: 60 }, (_, i) => `id${i}`))).rejects.toMatchObject({
+    await expect(tagTitles(Array.from({ length: 60 }, (_, i) => `id${i}`), { delayMs: 0 })).rejects.toMatchObject({
       kind: "rate_limit",
     });
     expect(generateJson).toHaveBeenCalledTimes(1);
+  });
+
+  it("paces requests to stay under the 5-per-minute cap", async () => {
+    // The free tier allows 5 requests/minute as well as 20/day, so batches must
+    // not fire back to back. Without this the 6th request of a backfill 429s
+    // inside the first minute with most of the daily budget still unspent.
+    vi.useFakeTimers();
+    try {
+      mock(prisma.title.findMany).mockResolvedValue(
+        Array.from({ length: 25 }, (_, i) => row(i)),
+      );
+      mock(generateJson).mockResolvedValue([]);
+
+      const promise = tagTitles(Array.from({ length: 25 }, (_, i) => `id${i}`));
+
+      // First request goes immediately; the second must still be waiting.
+      await vi.advanceTimersByTimeAsync(0);
+      expect(generateJson).toHaveBeenCalledTimes(1);
+
+      // Not yet: one millisecond short of the delay.
+      await vi.advanceTimersByTimeAsync(INTER_REQUEST_DELAY_MS - 1);
+      expect(generateJson).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(1);
+      await promise;
+      expect(generateJson).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not wait when there is only one request to make", async () => {
+    // The add/refresh path tags a single title; pacing must not delay it.
+    vi.useFakeTimers();
+    try {
+      mock(prisma.title.findMany).mockResolvedValue([row(0, { title: "Parasite" })]);
+      mock(generateJson).mockResolvedValue([{ index: 0, title: "Parasite", moods: ["Weird"] }]);
+
+      const promise = tagTitles(["id0"]);
+      await vi.advanceTimersByTimeAsync(0);
+
+      await expect(promise).resolves.toMatchObject({ tagged: 1, requests: 1 });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps the pacing delay above the per-minute limit's requirement", () => {
+    // 5 requests/minute means a floor of 12s between requests; the constant must
+    // sit above that, or a "small optimisation" silently reintroduces the 429.
+    expect(INTER_REQUEST_DELAY_MS).toBeGreaterThanOrEqual(13_000);
   });
 
   it("reports progress per request so a caller can show quota use", async () => {
@@ -390,7 +442,7 @@ describe("tagTitles", () => {
 
     await tagTitles(
       Array.from({ length: 45 }, (_, i) => `id${i}`),
-      { onRequest: (info) => seen.push(info) },
+      { onRequest: (info) => seen.push(info), delayMs: 0 },
     );
 
     expect(seen.map((s) => s.requestNumber)).toEqual([1, 2, 3]);

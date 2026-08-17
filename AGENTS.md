@@ -34,3 +34,5 @@ This version has breaking changes — APIs, conventions, and file structure may 
 
 - The model is `gemini-flash-latest`, a rolling alias. Never pin a version; pinned models get retired for new API keys and 404 while still appearing in ListModels.
 - It is a thinking model whose reasoning tokens share `maxOutputTokens`. Keep `maxOutputTokens` generous (8192) and the input history bounded (~40 items), or responses truncate to empty.
+- The free tier caps requests TWO ways: 20/day AND 5/minute. Any loop making multiple calls must pace itself (~15s apart), or it 429s on the 6th request inside the first minute with most of the daily budget still unspent. Both caps return the same 429, so a rate-limit message should name both.
+- `gemini-flash-latest` moves as Google ships new Flash versions (3.7 Flash as of 2026-08-17). If output quality or token usage shifts with no code change, check what the alias resolves to before debugging.

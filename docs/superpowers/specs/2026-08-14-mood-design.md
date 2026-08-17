@@ -304,7 +304,8 @@ about. It simply means the input side has even more margin than assumed.
 
 The free tier allows **20 requests per day** (confirm against current Google AI
 Studio limits at implementation time; if the number has changed, only this
-subsection's conclusion changes, not the batch size).
+subsection's conclusion changes, not the batch size). It **also caps requests
+per minute at 5**, which is a separate constraint and is handled in section 7.1.
 
 ```
 Want titles to tag          327   (measured, Task 2)
@@ -329,6 +330,32 @@ titles** (20 requests of 20 titles), so 327 leaves 73 titles of headroom before
 the Want list alone needs a second day. Past that it spans two days, which costs
 nothing extra because the script is resumable by construction (it selects
 `moodsTaggedAt IS NULL`, so re-running continues rather than restarts).
+
+### 7.1 The per-minute cap, and why pacing is mandatory
+
+The daily cap is not the only limit. The free tier also allows **5 requests per
+minute**, and that one bites first.
+
+An earlier draft of this section concluded that no inter-request delay was
+needed "because it is 17 requests, not 327." That reasoning only considered the
+daily cap and was **wrong**. Fired back to back, a 17-batch backfill would 429
+on its **6th request, inside the first minute**. The failure looks especially
+misleading: the run stops as designed, the daily budget still shows 15 requests
+remaining, and yet only 100 of 327 titles got tagged. Five of the day's twenty
+requests would have been spent to do less than a third of the work.
+
+So pacing is a **correctness requirement, not politeness**:
+
+- `INTER_REQUEST_DELAY_MS = 15_000` in `src/lib/mood/tagger.ts`, applied before every request except the first. 15s holds the rate at 4/minute, one under the cap.
+- It lives in the tagger, not the script, because that is where the batch loop is. It **defaults on**, so any future multi-batch caller is paced whether or not it remembers to ask; only tests pass `delayMs: 0`.
+- A full Want backfill therefore takes **~4 minutes** (16 gaps of 15s plus response time), which costs nothing for a one-off script.
+- A test asserts the constant stays at or above 13s, so a later "optimisation" that shortens it fails the suite rather than silently reintroducing the 429.
+- The single-title add/refresh path makes one request and so never waits.
+
+Because both caps return the same 429, the backfill's stop message names both
+possibilities: with pacing in place, a 429 early in a run means the delay is too
+short, while a 429 near the end means the day is genuinely spent. The client
+already logs the non-200 body, which names the quota that was hit.
 
 ### Incremental tagging cost
 
@@ -481,7 +508,7 @@ Differences specific to tagging:
 - **Prints the running request count** as it goes (`request 7/16, 13 of the 20 daily budget used`), so remaining quota is visible during the run rather than worked out afterwards.
 - Takes an optional `--limit N` (batches, not titles) so a run can be kept inside the remaining daily request budget.
 - Stops early and says so on a `rate_limit` error, rather than grinding through sixteen guaranteed failures.
-- Needs no inter-request delay for rate-limit reasons the way the TMDb/OMDb scripts do (17 requests total, not 327), but keeps a small pause for tidiness.
+- **Paces requests at 15s** via the tagger's `INTER_REQUEST_DELAY_MS`, because the free tier also caps requests per MINUTE at 5 (section 7.1). A full Want run therefore takes ~4 minutes.
 
 ## 10. Error handling and degradation
 

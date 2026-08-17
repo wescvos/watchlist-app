@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach, type Mock } from "vitest";
 
 vi.mock("@/lib/tmdb", () => ({ searchTitles: vi.fn() }));
 vi.mock("@/lib/titles", () => ({
@@ -11,12 +11,23 @@ vi.mock("@/lib/titles", () => ({
 vi.mock("@/lib/prisma", () => ({
   prisma: { title: { findMany: vi.fn().mockResolvedValue([]) } },
 }));
+vi.mock("@/lib/mood/tagger", () => ({ tagIfUntagged: vi.fn().mockResolvedValue(undefined) }));
+// Partial mock: keep the real NextResponse, and make after() run its callback
+// immediately WITHOUT awaiting it, which is how the real one behaves relative
+// to the response.
+vi.mock("next/server", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("next/server")>();
+  return { ...actual, after: vi.fn((cb: () => unknown) => { void cb(); }) };
+});
 
+import { after } from "next/server";
 import { searchTitles } from "@/lib/tmdb";
 import { GET } from "@/app/api/search/route";
 import { PATCH } from "@/app/api/titles/[id]/route";
 import { POST as addTitleRoute } from "@/app/api/titles/route";
-import { updateTitle, addTitle } from "@/lib/titles";
+import { POST as refreshRoute } from "@/app/api/titles/[id]/refresh/route";
+import { updateTitle, addTitle, refreshTitle } from "@/lib/titles";
+import { tagIfUntagged } from "@/lib/mood/tagger";
 
 describe("GET /api/search", () => {
   it("returns 400 without q", async () => {
@@ -75,5 +86,86 @@ describe("POST /api/titles status validation", () => {
     const res = await addTitleRoute(new Request("http://x/api/titles", { method: "POST", body: JSON.stringify({ tmdbId: 1, mediaType: "MOVIE" }) }));
     expect(res.status).toBe(200);
     expect(addTitle).toHaveBeenCalledWith(1, "MOVIE", "WANT");
+  });
+});
+
+describe("mood tagging is scheduled, never awaited", () => {
+  const asMock = (fn: unknown) => fn as Mock;
+
+  function addReq(body: unknown) {
+    return new Request("http://x/api/titles", { method: "POST", body: JSON.stringify(body) });
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    asMock(tagIfUntagged).mockResolvedValue(undefined);
+  });
+
+  it("schedules exactly one tagging call for a newly added title", async () => {
+    asMock(addTitle).mockResolvedValue({ id: "new-id", status: "WANT" });
+
+    const res = await addTitleRoute(addReq({ tmdbId: 1, mediaType: "MOVIE" }));
+
+    expect(res.status).toBe(200);
+    expect(after).toHaveBeenCalledTimes(1);
+    expect(tagIfUntagged).toHaveBeenCalledTimes(1);
+    expect(tagIfUntagged).toHaveBeenCalledWith("new-id");
+  });
+
+  it("returns the add response without waiting for tagging to finish", async () => {
+    asMock(addTitle).mockResolvedValue({ id: "new-id", status: "WANT" });
+    // Tagging that never settles: the response must still come back.
+    asMock(tagIfUntagged).mockReturnValue(new Promise(() => {}));
+
+    const res = await addTitleRoute(addReq({ tmdbId: 1, mediaType: "MOVIE" }));
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ id: "new-id" });
+  });
+
+  it("does not schedule tagging when the add itself failed", async () => {
+    asMock(addTitle).mockRejectedValue(new Error("tmdb down"));
+
+    const res = await addTitleRoute(addReq({ tmdbId: 1, mediaType: "MOVIE" }));
+
+    expect(res.status).toBe(502);
+    expect(tagIfUntagged).not.toHaveBeenCalled();
+  });
+
+  it("does not schedule tagging for a request rejected by validation", async () => {
+    const res = await addTitleRoute(addReq({ tmdbId: 1, mediaType: "PODCAST" }));
+
+    expect(res.status).toBe(400);
+    expect(addTitle).not.toHaveBeenCalled();
+    expect(tagIfUntagged).not.toHaveBeenCalled();
+  });
+
+  it("schedules tagging after a refresh", async () => {
+    asMock(refreshTitle).mockResolvedValue({ id: "abc" });
+
+    const res = await refreshRoute(new Request("http://x/api/titles/abc/refresh", { method: "POST" }), ctx);
+
+    expect(res.status).toBe(200);
+    expect(tagIfUntagged).toHaveBeenCalledWith("abc");
+  });
+
+  it("does not schedule tagging when the refresh failed", async () => {
+    asMock(refreshTitle).mockRejectedValue(new Error("tmdb down"));
+
+    const res = await refreshRoute(new Request("http://x/api/titles/abc/refresh", { method: "POST" }), ctx);
+
+    expect(res.status).toBe(502);
+    expect(tagIfUntagged).not.toHaveBeenCalled();
+  });
+
+  it("a tagging rejection cannot change the response", async () => {
+    asMock(addTitle).mockResolvedValue({ id: "new-id", status: "WANT" });
+    // tagIfUntagged swallows its own errors, but assert the route survives even
+    // if that contract were ever broken.
+    asMock(tagIfUntagged).mockRejectedValue(new Error("gemini down"));
+
+    const res = await addTitleRoute(addReq({ tmdbId: 1, mediaType: "MOVIE" }));
+
+    expect(res.status).toBe(200);
   });
 });

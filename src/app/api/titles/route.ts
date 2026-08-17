@@ -1,5 +1,6 @@
-import { NextResponse } from "next/server";
+import { NextResponse, after } from "next/server";
 import { listTitles, addTitle } from "@/lib/titles";
+import { tagIfUntagged } from "@/lib/mood/tagger";
 import { Status } from "@prisma/client";
 import type { MediaKind } from "@/lib/types";
 
@@ -28,7 +29,13 @@ export async function POST(req: Request) {
     status = body.status;
   }
   try {
-    return NextResponse.json(await addTitle(tmdbId, mediaType, status));
+    const title = await addTitle(tmdbId, mediaType, status);
+    // Mood-tag after the response is sent, so "+ Add" never waits on Gemini.
+    // after() rather than a bare unawaited promise: on Vercel the function can
+    // be frozen before a detached promise settles. tagIfUntagged is a no-op for
+    // an already-tagged title and never rejects.
+    after(() => tagIfUntagged(title.id));
+    return NextResponse.json(title);
   } catch {
     return NextResponse.json({ error: "Add failed" }, { status: 502 });
   }

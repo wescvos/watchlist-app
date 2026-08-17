@@ -23,6 +23,23 @@ export const TAG_BATCH_SIZE = 20;
 // judgement needs, while bounding per-title input cost.
 export const OVERVIEW_MAX_CHARS = 400;
 
+// REQUIRED PACING, NOT POLITENESS. DO NOT REMOVE OR SHORTEN.
+//
+// The Gemini free tier caps requests per MINUTE at 5, separately from the 20
+// per day. Firing batches back to back would 429 on the 6th request inside the
+// first minute: the daily budget would still show 15 requests left, but a
+// 17-batch backfill would have tagged only 100 of 327 titles and stopped.
+// 15s spacing holds the rate at 4/minute, one under the cap. A full backfill
+// then takes ~4 minutes, which costs nothing for a one-off script.
+//
+// Defaults ON, so a caller that loops many batches is paced whether or not it
+// remembers to ask. Only tests set it to 0.
+export const INTER_REQUEST_DELAY_MS = 15_000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 // Classification, not generation: keep it near-deterministic. (The removed
 // recommend path used 0.9, which was tuned for variety in invented picks.)
 const TEMPERATURE = 0.2;
@@ -46,10 +63,16 @@ export interface TagProgress {
   requestNumber: number;
   totalRequests: number;
   batchSize: number;
+  /** Since tagTitles started. */
+  elapsedMs: number;
+  /** Since the previous request began, so pacing is visible. Null on the first. */
+  sinceLastMs: number | null;
 }
 
 export interface TagOptions {
   onRequest?: (progress: TagProgress) => void;
+  /** Overrides INTER_REQUEST_DELAY_MS. Only tests should pass 0. */
+  delayMs?: number;
 }
 
 export interface TagResult {
@@ -180,6 +203,9 @@ function toBatches<T>(items: T[], size: number): T[][] {
  * Tag the given titles, in batches. Writes are per title, not per batch, so a
  * response covering 18 of 20 tags those 18 and leaves the rest for next time.
  *
+ * Requests are paced by INTER_REQUEST_DELAY_MS to stay under the free tier's
+ * 5-per-minute limit; a single-batch call never waits.
+ *
  * Throws only on a rate limit, where continuing would waste every remaining
  * batch on a guaranteed failure. Any other Gemini failure fails that batch
  * alone and the run continues.
@@ -194,11 +220,18 @@ export async function tagTitles(ids: string[], opts: TagOptions = {}): Promise<T
   });
 
   const batches = toBatches(rows, TAG_BATCH_SIZE);
+  const delayMs = opts.delayMs ?? INTER_REQUEST_DELAY_MS;
+  const startedAt = Date.now();
+  let lastRequestAt: number | null = null;
   let tagged = 0;
   let failed = 0;
   let requests = 0;
 
   for (const rowBatch of batches) {
+    // Stay under the per-minute cap. Before each request except the first, so a
+    // single-batch call (the add/refresh path) never waits.
+    if (lastRequestAt !== null && delayMs > 0) await sleep(delayMs);
+
     // Indices are batch-local, so the model always counts from zero.
     const batch: TaggableTitle[] = rowBatch.map((r, i) => ({
       index: i,
@@ -210,7 +243,15 @@ export async function tagTitles(ids: string[], opts: TagOptions = {}): Promise<T
     }));
 
     requests++;
-    opts.onRequest?.({ requestNumber: requests, totalRequests: batches.length, batchSize: batch.length });
+    const requestAt = Date.now();
+    opts.onRequest?.({
+      requestNumber: requests,
+      totalRequests: batches.length,
+      batchSize: batch.length,
+      elapsedMs: requestAt - startedAt,
+      sinceLastMs: lastRequestAt === null ? null : requestAt - lastRequestAt,
+    });
+    lastRequestAt = requestAt;
 
     let taggings: MoodTagging[];
     try {
