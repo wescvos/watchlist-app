@@ -282,10 +282,16 @@ export default function Home() {
       <div className="mb-4 flex items-center justify-between">
         <h1 className="text-lg font-semibold">Watchlist</h1>
         <div className="flex items-center gap-1.5">
-          {/* The secondary ghost-styled slot next to "+ Add" is empty for now:
-              "For You" was removed with its feature, and "Mood" arrives in the
-              same slot alongside the screens it links to, so no deployed state
-              ships a nav entry pointing at a route that doesn't exist yet. */}
+          {/* Secondary entry ("Mood"): subdued ghost styling so the solid
+              "+ Add" pill stays the primary action. An action, not a list tab.
+              Landed in the same commit as /mood itself, so no deployed state
+              ever carried a nav entry pointing at a route that didn't exist. */}
+          <Link
+            href="/mood"
+            className="rounded-lg px-3 py-2 text-sm font-medium text-gray-500 transition-colors hover:bg-gray-100 hover:text-foreground active:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground dark:hover:bg-white/10 dark:active:bg-white/10"
+          >
+            Mood
+          </Link>
           <Link
             href="/search"
             className="rounded-lg bg-foreground px-3 py-2 text-sm text-background transition-opacity hover:opacity-90 active:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground focus-visible:ring-offset-2 focus-visible:ring-offset-background"
