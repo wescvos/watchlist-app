@@ -21,11 +21,20 @@
  *   - Resumable by construction: it selects moodsTaggedAt IS NULL, so
  *     re-running continues rather than restarting.
  *
+ * MODEL. Rate limits are PER MODEL, so switching models means a fresh daily
+ * budget. That matters when the rolling `gemini-flash-latest` alias lands on an
+ * unstable version: on 2026-08-17 it rolled onto Gemini 3.7 Flash the day that
+ * model shipped, every request 503'd with "high demand", and the failed requests
+ * still counted against 3.7's quota. Passing --model pins this run to a
+ * known-good version with an untouched budget. Prefer the alias normally; pin
+ * deliberately when the alias is unstable, and drop the flag once it settles.
+ *
  * Not wired into the app. Run manually:
  *   npx tsx scripts/tag-all-moods.ts --dry-run  # print the plan, spend nothing
- *   npx tsx scripts/tag-all-moods.ts            # Want only
+ *   npx tsx scripts/tag-all-moods.ts            # Want only, rolling alias
  *   npx tsx scripts/tag-all-moods.ts --limit 5  # at most 5 requests
  *   npx tsx scripts/tag-all-moods.ts --all      # Want and Watched
+ *   npx tsx scripts/tag-all-moods.ts --model gemini-3.6-flash   # pin this run
  *
  * --dry-run exists because the real run is effectively one-shot against a
  * day's budget: it proves the selection, the scope, and the request count
@@ -48,24 +57,31 @@ const PER_MINUTE_CAP = 5;
 function parseArgs(argv: string[]) {
   const all = argv.includes("--all");
   const dryRun = argv.includes("--dry-run");
+  const modelFlag = argv.indexOf("--model");
+  const model = modelFlag >= 0 ? argv[modelFlag + 1] : undefined;
+  if (modelFlag >= 0 && (!model || model.startsWith("--"))) {
+    console.error("--model needs a model id, e.g. gemini-3.6-flash");
+    process.exit(1);
+  }
   const limitFlag = argv.indexOf("--limit");
   const limit = limitFlag >= 0 ? Number(argv[limitFlag + 1]) : NaN;
   if (limitFlag >= 0 && (!Number.isInteger(limit) || limit < 1)) {
     console.error("--limit needs a positive whole number of requests");
     process.exit(1);
   }
-  return { all, dryRun, limit: limitFlag >= 0 ? limit : null };
+  return { all, dryRun, model, limit: limitFlag >= 0 ? limit : null };
 }
 
 async function main() {
-  const { all, dryRun, limit } = parseArgs(process.argv.slice(2));
+  const { all, dryRun, model, limit } = parseArgs(process.argv.slice(2));
 
   // Dynamic import: prisma.ts reads process.env.DATABASE_URL at module scope,
   // so it must load after dotenv has populated process.env above — a static
   // import would be hoisted ahead of that config() call.
   const { prisma } = await import("../src/lib/prisma");
   const { tagTitles, TAG_BATCH_SIZE, INTER_REQUEST_DELAY_MS } = await import("../src/lib/mood/tagger");
-  const { GeminiError } = await import("../src/lib/gemini/client");
+  const { GeminiError, resolveModel, GEMINI_MODEL } = await import("../src/lib/gemini/client");
+  const servingModel = resolveModel(model);
 
   const where = all
     ? { moodsTaggedAt: null }
@@ -91,6 +107,7 @@ async function main() {
 
   // Pacing means the run takes minutes; say so up front rather than looking hung.
   const etaSeconds = Math.round(((plannedRequests - 1) * INTER_REQUEST_DELAY_MS) / 1000);
+  console.log(`Model: ${servingModel}${servingModel === GEMINI_MODEL ? " (rolling alias)" : " (PINNED for this run)"}`);
   console.log(`Untagged ${scope} titles: ${untagged.length}`);
   console.log(`Tagging ${targets.length} of them in ${plannedRequests} request(s) of up to ${TAG_BATCH_SIZE}.`);
   console.log(
@@ -120,11 +137,12 @@ async function main() {
   let rateLimited = false;
   const started = process.hrtime.bigint();
 
-  let result = { tagged: 0, failed: 0, requests: 0 };
+  let result = { tagged: 0, failed: 0, requests: 0, model: servingModel, abortedAfterConsecutiveFailures: false };
   try {
     result = await tagTitles(
       targets.map((t) => t.id),
       {
+        model,
         onRequest: ({ requestNumber, totalRequests, batchSize, elapsedMs, sinceLastMs }) => {
           const left = Math.max(0, DAILY_REQUEST_CAP - requestNumber);
           const at = `t+${(elapsedMs / 1000).toFixed(0)}s`;
@@ -167,7 +185,13 @@ async function main() {
   });
 
   console.log("\n" + "=".repeat(60));
-  console.log(`Done in ${seconds.toFixed(1)}s. Tagged ${result.tagged}, failed ${result.failed}, using ${result.requests} request(s).`);
+  console.log(`Done in ${seconds.toFixed(1)}s on model ${result.model}.`);
+  console.log(`Tagged ${result.tagged}, failed ${result.failed}, using ${result.requests} request(s).`);
+  if (result.abortedAfterConsecutiveFailures) {
+    console.log(`  STOPPED EARLY: ${servingModel} failed 3 batches in a row, so the run gave up rather than`);
+    console.log(`  spending the rest of the budget on it. Rate limits are per model, so retry with`);
+    console.log(`  --model on a different one (e.g. gemini-3.5-flash, or a Lite variant for a far larger quota).`);
+  }
   console.log(`  ${withMoods} ${scope} titles now carry at least one mood.`);
   console.log(`  ${noMoodMatched} were tagged but matched no mood (allowed, and never retried).`);
   console.log(`  ${remaining} still untagged${rateLimited ? " (rate limit hit)" : ""}.`);

@@ -370,6 +370,57 @@ describe("tagTitles", () => {
     expect(mock(prisma.title.update).mock.calls[0][0].where).toEqual({ id: "id20" });
   });
 
+  it("stops after 3 consecutive batch failures instead of burning the whole budget", async () => {
+    // The 2026-08-17 failure: an unavailable model 503'd every call and the run
+    // spent 17 of 20 daily requests learning that one batch at a time.
+    mock(prisma.title.findMany).mockResolvedValue(
+      Array.from({ length: 200 }, (_, i) => row(i)),
+    );
+    mock(generateJson).mockRejectedValue(new GeminiError("high demand", "failure"));
+
+    const result = await tagTitles(
+      Array.from({ length: 200 }, (_, i) => `id${i}`),
+      { delayMs: 0 },
+    );
+
+    expect(generateJson).toHaveBeenCalledTimes(3);
+    expect(result.abortedAfterConsecutiveFailures).toBe(true);
+    expect(result.tagged).toBe(0);
+  });
+
+  it("resets the failure counter after a success, so intermittent errors do not abort", async () => {
+    mock(prisma.title.findMany).mockResolvedValue(
+      Array.from({ length: 100 }, (_, i) => row(i)),
+    );
+    mock(generateJson)
+      .mockRejectedValueOnce(new GeminiError("blip", "failure"))
+      .mockRejectedValueOnce(new GeminiError("blip", "failure"))
+      .mockResolvedValueOnce([{ index: 0, title: "Film 40", moods: ["Weird"] }])
+      .mockRejectedValueOnce(new GeminiError("blip", "failure"))
+      .mockRejectedValueOnce(new GeminiError("blip", "failure"));
+
+    const result = await tagTitles(
+      Array.from({ length: 100 }, (_, i) => `id${i}`),
+      { delayMs: 0 },
+    );
+
+    // All five batches attempted: the success in the middle reset the counter.
+    expect(generateJson).toHaveBeenCalledTimes(5);
+    expect(result.abortedAfterConsecutiveFailures).toBe(false);
+    expect(result.tagged).toBe(1);
+  });
+
+  it("reports which model served the run", async () => {
+    mock(prisma.title.findMany).mockResolvedValue([row(0, { title: "Parasite" })]);
+    mock(generateJson).mockResolvedValue([{ index: 0, title: "Parasite", moods: ["Weird"] }]);
+
+    const result = await tagTitles(["id0"], { delayMs: 0, model: "gemini-3.6-flash" });
+
+    expect(result.model).toBe("gemini-3.6-flash");
+    const opts = mock(generateJson).mock.calls[0][0] as { model?: string };
+    expect(opts.model).toBe("gemini-3.6-flash");
+  });
+
   it("stops immediately on a rate limit instead of burning the remaining batches", async () => {
     mock(prisma.title.findMany).mockResolvedValue(
       Array.from({ length: 60 }, (_, i) => row(i)),

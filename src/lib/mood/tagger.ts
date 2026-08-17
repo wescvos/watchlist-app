@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/prisma";
-import { generateJson, GeminiError } from "@/lib/gemini/client";
+import { generateJson, GeminiError, resolveModel } from "@/lib/gemini/client";
 import { MOODS, MOOD_LABELS, MOOD_DISAMBIGUATION, MOOD_EXAMPLES, isMoodLabel } from "@/lib/moods";
 import { isCloseMatch } from "@/lib/tmdbMatch";
 import type { MediaKind } from "@/lib/types";
@@ -63,6 +63,8 @@ export interface TagProgress {
   requestNumber: number;
   totalRequests: number;
   batchSize: number;
+  /** The model serving this request. */
+  model: string;
   /** Since tagTitles started. */
   elapsedMs: number;
   /** Since the previous request began, so pacing is visible. Null on the first. */
@@ -73,7 +75,19 @@ export interface TagOptions {
   onRequest?: (progress: TagProgress) => void;
   /** Overrides INTER_REQUEST_DELAY_MS. Only tests should pass 0. */
   delayMs?: number;
+  /** Overrides the rolling model alias for this run. See resolveModel. */
+  model?: string;
+  /** Test seam, forwarded to the client. */
+  retryDelaysMs?: number[];
 }
+
+// Stop a run when the model is simply down. On 2026-08-17 the alias rolled onto
+// a just-released model that 503'd on every call, and the backfill spent 17 of
+// the day's 20 requests discovering that one batch at a time. Three consecutive
+// batch failures is enough evidence: stop and report, leaving the budget for a
+// retry against a model that works. A single success resets the counter, since
+// intermittent failures are the case retrying is for.
+const MAX_CONSECUTIVE_BATCH_FAILURES = 3;
 
 export interface TagResult {
   tagged: number;
@@ -81,6 +95,10 @@ export interface TagResult {
    *  in neither count: they stay untagged and the next run picks them up. */
   failed: number;
   requests: number;
+  /** Which model actually served the requests. */
+  model: string;
+  /** Set when the run stopped early because the model kept failing. */
+  abortedAfterConsecutiveFailures: boolean;
 }
 
 export const MOOD_RESPONSE_SCHEMA = {
@@ -211,7 +229,10 @@ function toBatches<T>(items: T[], size: number): T[][] {
  * alone and the run continues.
  */
 export async function tagTitles(ids: string[], opts: TagOptions = {}): Promise<TagResult> {
-  if (ids.length === 0) return { tagged: 0, failed: 0, requests: 0 };
+  const model = resolveModel(opts.model);
+  if (ids.length === 0) {
+    return { tagged: 0, failed: 0, requests: 0, model, abortedAfterConsecutiveFailures: false };
+  }
 
   const rows = await prisma.title.findMany({
     where: { id: { in: ids } },
@@ -226,6 +247,8 @@ export async function tagTitles(ids: string[], opts: TagOptions = {}): Promise<T
   let tagged = 0;
   let failed = 0;
   let requests = 0;
+  let consecutiveFailures = 0;
+  let aborted = false;
 
   for (const rowBatch of batches) {
     // Stay under the per-minute cap. Before each request except the first, so a
@@ -248,6 +271,7 @@ export async function tagTitles(ids: string[], opts: TagOptions = {}): Promise<T
       requestNumber: requests,
       totalRequests: batches.length,
       batchSize: batch.length,
+      model,
       elapsedMs: requestAt - startedAt,
       sinceLastMs: lastRequestAt === null ? null : requestAt - lastRequestAt,
     });
@@ -261,12 +285,24 @@ export async function tagTitles(ids: string[], opts: TagOptions = {}): Promise<T
         logPrefix: "[mood]",
         temperature: TEMPERATURE,
         expectArray: true,
+        model: opts.model,
+        retryDelaysMs: opts.retryDelaysMs,
       });
       taggings = parseMoodTaggings(raw, batch);
+      consecutiveFailures = 0;
     } catch (e) {
       if (e instanceof GeminiError && e.kind === "rate_limit") throw e;
       console.error(`[mood] batch of ${batch.length} failed: ${e instanceof Error ? e.message : String(e)}`);
       failed += batch.length;
+      consecutiveFailures++;
+      if (consecutiveFailures >= MAX_CONSECUTIVE_BATCH_FAILURES) {
+        console.error(
+          `[mood] stopping after ${consecutiveFailures} consecutive batch failures on model=${model}. ` +
+            "The model looks unavailable; a further attempt would spend quota to learn nothing.",
+        );
+        aborted = true;
+        break;
+      }
       continue;
     }
 
@@ -282,7 +318,7 @@ export async function tagTitles(ids: string[], opts: TagOptions = {}): Promise<T
     }
   }
 
-  return { tagged, failed, requests };
+  return { tagged, failed, requests, model, abortedAfterConsecutiveFailures: aborted };
 }
 
 /**

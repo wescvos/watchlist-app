@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { generateJson, GeminiError, GEMINI_MODEL, MAX_OUTPUT_TOKENS } from "@/lib/gemini/client";
+import { generateJson, GeminiError, GEMINI_MODEL, MAX_OUTPUT_TOKENS, resolveModel } from "@/lib/gemini/client";
 
 // Ported from the removed src/lib/recommend/__tests__/gemini.test.ts, which was
 // the only coverage on this plumbing. The cases that belonged to the transport
@@ -95,7 +95,9 @@ describe("generateJson", () => {
   });
 
   it("throws on a non-200 response", async () => {
-    stubFetchJson({}, { ok: false, status: 500 });
+    // 400 rather than 500: a 5xx is now retried with backoff, and that path has
+    // its own tests below. This case is "a non-200 throws".
+    stubFetchJson({}, { ok: false, status: 400 });
     await expect(call()).rejects.toBeInstanceOf(GeminiError);
   });
 
@@ -153,6 +155,101 @@ describe("generateJson", () => {
     const assertion = expect(promise).rejects.toThrow(/timed out/);
     await vi.advanceTimersByTimeAsync(5_000);
     await assertion;
+  });
+});
+
+describe("generateJson model selection", () => {
+  it("uses the rolling alias by default", async () => {
+    const fetchMock = stubFetchJson(envelope("[]"));
+    await call();
+    const [url] = fetchMock.mock.calls[0] as unknown as [string];
+    expect(url).toContain(`models/${GEMINI_MODEL}:generateContent`);
+  });
+
+  it("honours an explicit model override", async () => {
+    const fetchMock = stubFetchJson(envelope("[]"));
+    await call({ model: "gemini-3.6-flash" });
+    const [url] = fetchMock.mock.calls[0] as unknown as [string];
+    expect(url).toContain("models/gemini-3.6-flash:generateContent");
+    expect(url).not.toContain("gemini-flash-latest");
+  });
+
+  it("honours GEMINI_MODEL_OVERRIDE, with the explicit argument winning", async () => {
+    process.env.GEMINI_MODEL_OVERRIDE = "gemini-3.5-flash";
+    try {
+      expect(resolveModel()).toBe("gemini-3.5-flash");
+      expect(resolveModel("gemini-3.6-flash")).toBe("gemini-3.6-flash");
+    } finally {
+      delete process.env.GEMINI_MODEL_OVERRIDE;
+    }
+    expect(resolveModel()).toBe(GEMINI_MODEL);
+  });
+});
+
+describe("generateJson 5xx retry", () => {
+  // Rate limits are per model and a failed request still counts, so retrying is
+  // only correct for "busy, try again" (5xx), and must be bounded.
+  const noWait = { retryDelaysMs: [0, 0] };
+
+  it("retries a 503 and succeeds on a later attempt", async () => {
+    const res = (ok: boolean, status: number, payload: unknown) =>
+      ({ ok, status, json: async () => payload, text: async () => JSON.stringify(payload) }) as unknown as Response;
+    const fn = vi
+      .fn()
+      .mockResolvedValueOnce(res(false, 503, { error: "high demand" }))
+      .mockResolvedValueOnce(res(true, 200, envelope('[{"ok":true}]')));
+    vi.stubGlobal("fetch", fn);
+
+    await expect(call(noWait)).resolves.toEqual([{ ok: true }]);
+    expect(fn).toHaveBeenCalledTimes(2);
+  });
+
+  it("gives up after the bounded number of attempts", async () => {
+    stubFetchJson({ error: "high demand" }, { ok: false, status: 503 });
+    await expect(call(noWait)).rejects.toBeInstanceOf(GeminiError);
+    // 1 initial + 2 retries, never unbounded: each attempt costs daily quota.
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(3);
+  });
+
+  it("does NOT retry a 429, since a rate limit needs waiting out", async () => {
+    stubFetchJson({}, { ok: false, status: 429 });
+    await expect(call(noWait)).rejects.toMatchObject({ kind: "rate_limit" });
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1);
+  });
+
+  it("does NOT retry a 4xx, which would fail identically forever", async () => {
+    stubFetchJson({ error: "model not found" }, { ok: false, status: 404 });
+    await expect(call(noWait)).rejects.toBeInstanceOf(GeminiError);
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1);
+  });
+
+  it("retries other 5xx statuses too", async () => {
+    stubFetchJson({}, { ok: false, status: 500 });
+    await expect(call(noWait)).rejects.toBeInstanceOf(GeminiError);
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(3);
+  });
+
+  it("waits between attempts by default, so retries cannot trip the per-minute cap", async () => {
+    vi.useFakeTimers();
+    try {
+      stubFetchJson({}, { ok: false, status: 503 });
+      const promise = call().catch(() => "failed");
+
+      await vi.advanceTimersByTimeAsync(0);
+      expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1);
+
+      // Default backoff is 15s then 30s, both at or above the 15s spacing the
+      // 5-per-minute cap requires.
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(vi.mocked(fetch)).toHaveBeenCalledTimes(2);
+
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(vi.mocked(fetch)).toHaveBeenCalledTimes(3);
+
+      await expect(promise).resolves.toBe("failed");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 
