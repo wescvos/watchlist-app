@@ -32,6 +32,13 @@ model Title {
   numberOfEpisodes Int?
   genres           String[]
   spokenLanguages  String[]
+  // Canonical mood labels from src/lib/moods.ts, stored exactly like genres.
+  moods            String[]
+  // Set whenever the tagger has judged this title, INCLUDING when it matched no
+  // mood at all. `moods = []` alone can't tell "asked, legitimately nothing"
+  // from "never asked", and the backfill selector, the tag-once gate, and the
+  // untagged count on the mood screen all turn on that distinction.
+  moodsTaggedAt    DateTime?
   cast             Json      @default("[]")
   director         String?
   watchProviders   Json      @default("[]")
