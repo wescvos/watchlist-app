@@ -292,6 +292,14 @@ At N = 20 the input is `1,200 + 20 × 150 = 4,200` tokens, comfortably small, an
 20 items also respects the AGENTS.md guidance to keep the input history bounded
 around 40 items.
 
+**Measured against the real prompt (Task 3):** the preamble is 3,195 characters
+(~799 tokens, against the ~1,200 estimated) and a real title costs ~82 tokens
+rather than ~150, because most TMDb overviews land under the 400-character
+truncation. A full batch of 20 is ~2,445 input tokens, about 58% of the
+estimate. This does **not** license a larger batch: the binding constraint is
+thinking plus output against the 8,192 ceiling, which these figures say nothing
+about. It simply means the input side has even more margin than assumed.
+
 ### Does a full backfill fit in one day?
 
 The free tier allows **20 requests per day** (confirm against current Google AI
