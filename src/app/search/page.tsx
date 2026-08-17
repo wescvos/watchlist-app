@@ -6,6 +6,7 @@ import { BackLink } from "@/components/BackLink";
 import type { SearchResultWithLibrary } from "@/lib/types";
 import { listCache } from "@/lib/listCache";
 import { hydrateListCache } from "@/lib/listPersist";
+import { LOADING_DELAY_MS } from "@/lib/loadingDelay";
 import { searchCache, resetSearchCache } from "@/lib/searchCache";
 
 type Result = SearchResultWithLibrary;
@@ -60,6 +61,14 @@ export default function SearchPage() {
   // first render — no fetch, no flash of the fallback state first.
   const [wallPosters, setWallPosters] = useState<string[]>(cachedWallPosters);
   const hadCachedWallPosters = useRef(wallPosters.length > 0);
+  // A wall that was already available (in memory, or seeded from disk before
+  // paint) is a WARM render: it must not fade in, because a fade on top of an
+  // instant appearance is what compounds the jitter. The cold path still fades,
+  // which is where that animation was designed to earn its place.
+  const [wallWarm, setWallWarm] = useState(() => wallPosters.length > 0);
+  // Withhold the empty-state glyph on the same threshold as Home's skeleton, so
+  // a wall that resolves quickly never shows the glyph first. See LOADING_DELAY_MS.
+  const [wallDelayPassed, setWallDelayPassed] = useState(false);
   const router = useRouter();
   const searchedForRef = useRef(searchCache.searchedFor);
   const requestIdRef = useRef(0);
@@ -85,7 +94,17 @@ export default function SearchPage() {
     // than moving the wall's state into an external store. See the comment there.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setWallPosters(posters);
+    // Batched with the update above. Seeded from disk before paint counts as
+    // warm, so no entrance fade.
+    setWallWarm(true);
   }, []);
+
+  // Grace period for the glyph fallback, mirroring Home's skeleton delay.
+  useEffect(() => {
+    if (wallPosters.length > 0 || wallDelayPassed) return;
+    const timer = setTimeout(() => setWallDelayPassed(true), LOADING_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [wallPosters.length, wallDelayPassed]);
 
   // Belt-and-suspenders alongside the native autoFocus attribute below: some
   // mobile browsers only reliably open the keyboard from an imperative focus().
@@ -417,7 +436,7 @@ export default function SearchPage() {
              The bottom fade eases it into the page background, same
              technique family as the detail-page backdrop. */
           <div
-            className="relative overflow-hidden fade-in"
+            className={`relative overflow-hidden${wallWarm ? "" : " fade-in"}`}
             // A fixed height (not min-height) is what actually makes
             // overflow-hidden clip excess rows — min-height only sets a
             // floor, so a grid taller than 65vh (common with 20 tiles at 4
@@ -439,7 +458,12 @@ export default function SearchPage() {
             <div aria-hidden="true" className="pointer-events-none absolute inset-0 bg-background/75" />
             <div aria-hidden="true" className="pointer-events-none absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-background" />
           </div>
-        ) : (
+        ) : wallDelayPassed ? (
+          /* Held back for LOADING_DELAY_MS: the wall and this glyph occupy very
+             different heights, so showing the glyph first and swapping to the
+             wall a moment later is a full-height reflow. Below the threshold we
+             render nothing, so a wall that resolves fast is the first thing
+             drawn. */
           <div className="flex flex-col items-center py-16 text-center">
             <svg viewBox="0 0 48 48" className="h-14 w-14 text-gray-300 dark:text-white/15" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
               <rect x="14" y="10" width="24" height="32" rx="2" />
@@ -449,7 +473,7 @@ export default function SearchPage() {
             <p className="mt-4 font-medium">Find something to watch</p>
             <p className="mt-1 text-sm text-gray-500">Search movies and series to add to your list.</p>
           </div>
-        )}
+        ) : null}
         </div>
       </main>
     </>

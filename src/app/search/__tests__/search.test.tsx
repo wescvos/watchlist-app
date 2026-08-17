@@ -3,6 +3,7 @@ import { render, screen, fireEvent, act } from "@testing-library/react";
 import SearchPage from "@/app/search/page";
 import { listCache, emptyListState, type Status } from "@/lib/listCache";
 import { searchCache, resetSearchCache } from "@/lib/searchCache";
+import { LOADING_DELAY_MS } from "@/lib/loadingDelay";
 import type { CardTitle } from "@/components/TitleCard";
 
 // The router object must be a single stable instance, matching the real
@@ -208,6 +209,14 @@ describe("poster wall", () => {
     installFetch();
     const { container } = render(<SearchPage />);
     await flush();
+
+    // Held back for LOADING_DELAY_MS: the glyph and the wall are very different
+    // heights, so showing the glyph first and swapping would be a full-height
+    // reflow. Nothing is drawn inside the threshold.
+    expect(screen.queryByText("Find something to watch")).not.toBeInTheDocument();
+
+    await advance(LOADING_DELAY_MS + 20);
+
     expect(container.querySelectorAll("img").length).toBe(0);
     expect(screen.getByText("Find something to watch")).toBeInTheDocument();
   });

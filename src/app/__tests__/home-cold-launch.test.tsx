@@ -3,6 +3,7 @@ import { render, screen, act } from "@testing-library/react";
 import type { CardTitle } from "@/components/TitleCard";
 import { listCache, emptyListState } from "@/lib/listCache";
 import { persistLists } from "@/lib/listPersist";
+import { LOADING_DELAY_MS } from "@/lib/loadingDelay";
 
 const { routerMock } = vi.hoisted(() => ({
   routerMock: { replace: vi.fn(), push: vi.fn(), back: vi.fn(), refresh: vi.fn() },
@@ -46,7 +47,16 @@ function stubFetch(titles: CardTitle[]) {
   return fn;
 }
 
-const skeletons = (container: HTMLElement) => container.querySelectorAll(".animate-pulse");
+// The poster blocks specifically, not the text-line placeholders inside a tile.
+const skeletons = (container: HTMLElement) =>
+  container.querySelectorAll("[aria-hidden='true'] > div > .aspect-\\[2\\/3\\].animate-pulse");
+
+/** Push past the skeleton's grace period. */
+async function advancePastDelay() {
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, LOADING_DELAY_MS + 20));
+  });
+}
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -61,27 +71,62 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe("cold launch with nothing cached", () => {
-  it("still shows the skeleton", () => {
-    // THE GUARD: an absent persisted cache must not look like loaded-but-empty.
+describe("the skeleton is delayed, so a fast load never flashes it", () => {
+  it("renders no skeleton inside the delay threshold", async () => {
+    // The whole point: data now usually arrives within a frame or two, so an
+    // immediate skeleton appeared and vanished, reading as a glitch.
     stubPendingFetch();
 
     const { container } = render(<Home />);
+
+    expect(skeletons(container)).toHaveLength(0);
+    // Nor any other resolved state: an unloaded list must not look empty.
+    expect(screen.queryByText("Nothing on your list")).not.toBeInTheDocument();
+    expect(screen.queryByText("Nothing matches this filter yet")).not.toBeInTheDocument();
+  });
+
+  it("shows the skeleton once the threshold passes on a genuinely slow load", async () => {
+    // THE GUARD, still intact: an absent persisted cache must not look like
+    // loaded-but-empty, and a real wait must still get feedback.
+    stubPendingFetch();
+
+    const { container } = render(<Home />);
+    await advancePastDelay();
 
     expect(skeletons(container).length).toBeGreaterThan(0);
     expect(screen.queryByText("Nothing on your list")).not.toBeInTheDocument();
   });
 
-  it("still shows the skeleton when the stored payload is corrupt", () => {
+  it("never shows a skeleton when data arrives before the threshold", async () => {
+    stubFetch([card(1), card(2)]);
+
+    const { container } = render(<Home />);
+    expect(skeletons(container)).toHaveLength(0);
+
+    // Data lands first...
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.getByText("Film 1")).toBeInTheDocument();
+    expect(skeletons(container)).toHaveLength(0);
+
+    // ...and the timer firing afterwards cannot resurrect a skeleton, because
+    // the render condition also requires the list to still be unloaded.
+    await advancePastDelay();
+    expect(skeletons(container)).toHaveLength(0);
+  });
+
+  it("still shows the skeleton after the threshold when the stored payload is corrupt", async () => {
     window.localStorage.setItem("watchlist:lists", "{not json");
     stubPendingFetch();
 
     const { container } = render(<Home />);
+    await advancePastDelay();
 
     expect(skeletons(container).length).toBeGreaterThan(0);
   });
 
-  it("still shows the skeleton when the stored payload is an empty library", () => {
+  it("still shows the skeleton after the threshold when the stored payload is an empty library", async () => {
     window.localStorage.setItem(
       "watchlist:lists",
       JSON.stringify({ v: 1, lists: { WANT: [], WATCHED: [] } }),
@@ -89,9 +134,36 @@ describe("cold launch with nothing cached", () => {
     stubPendingFetch();
 
     const { container } = render(<Home />);
+    await advancePastDelay();
 
     expect(skeletons(container).length).toBeGreaterThan(0);
     expect(screen.queryByText("Nothing on your list")).not.toBeInTheDocument();
+  });
+
+  it("keeps the skeleton structurally identical to the real grid", async () => {
+    // Swapping between two differently-sized layouts reflows the page, which
+    // reads as jitter however fast the swap is. These were the three measured
+    // differences: the grid's top margin, the two text lines under each poster,
+    // and the filter row that only appeared once data landed.
+    stubPendingFetch();
+    const { container, unmount } = render(<Home />);
+    await advancePastDelay();
+    const skeletonGrid = container.querySelector(".grid")!;
+    const skeletonTile = skeletons(container)[0].parentElement!;
+    const skeletonHadFilterRow = !!screen.queryByRole("button", { name: "Movies" });
+    unmount();
+
+    listCache.WANT = { titles: [card(1)], loaded: true, fetching: false, error: false };
+    listCache.WATCHED = { titles: [], loaded: true, fetching: false, error: false };
+    const real = render(<Home />);
+    const realGrid = real.container.querySelector(".grid")!;
+
+    expect(skeletonGrid.className).toBe(realGrid.className.replace(" fade-in", ""));
+    // Poster block plus the title and meta lines: three children, as TitleCard.
+    expect(skeletonTile.children).toHaveLength(3);
+    // The filter row is present in both, so it cannot appear on the swap.
+    expect(skeletonHadFilterRow).toBe(true);
+    expect(screen.queryByRole("button", { name: "Movies" })).toBeInTheDocument();
   });
 });
 

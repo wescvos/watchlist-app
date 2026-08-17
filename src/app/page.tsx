@@ -7,6 +7,7 @@ import { TitleCard, type CardTitle } from "@/components/TitleCard";
 import type { MediaKind } from "@/lib/types";
 import { listCache, type ListState, type Status } from "@/lib/listCache";
 import { hydrateListCache, persistLists } from "@/lib/listPersist";
+import { LOADING_DELAY_MS } from "@/lib/loadingDelay";
 
 // Isolated so only this reads the URL — keeps the rest of the page server-rendered
 // instead of the whole tree bailing to client-only rendering for useSearchParams.
@@ -109,6 +110,22 @@ export default function Home() {
   const [typeFilter, setTypeFilterState] = useState<MediaKind | null>(null);
   const [sortModes, setSortModes] = useState<Record<Status, SortMode>>({ WANT: "default", WATCHED: "default" });
   const [lists, setListsState] = useState<Record<Status, ListState>>(() => listCache);
+  // Withhold the skeleton briefly. Since the list now seeds from localStorage,
+  // data usually arrives within a frame or two, so an immediate skeleton
+  // appeared and vanished ~300ms later: two different screens in quick
+  // succession, which reads as a glitch rather than as loading. Below the
+  // threshold we show nothing and go straight from empty to content; only a
+  // genuinely slow load crosses it, which is exactly when a skeleton earns its
+  // place. Tracked per status so switching to a not-yet-loaded tab gets the same
+  // grace period rather than flashing immediately.
+  const [skeletonDelayPassed, setSkeletonDelayPassed] = useState<Record<Status, boolean>>({
+    WANT: false,
+    WATCHED: false,
+  });
+  // Whether this mount was seeded from disk. A disk-seeded launch is a WARM
+  // render, so it must not replay the entrance animation: a fade landing on top
+  // of an already-fast swap is the compounding effect that made this worse.
+  const [diskSeeded, setDiskSeeded] = useState(false);
   const setLists = useCallback((updater: (prev: Record<Status, ListState>) => Record<Status, ListState>) => {
     setListsState((prev) => {
       const next = updater(prev);
@@ -229,7 +246,27 @@ export default function Home() {
     // user-visible gain. Deliberate exception, not an oversight.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setListsState({ ...listCache });
+    // Batched with the update above, so this costs no extra render.
+    setDiskSeeded(true);
   }, []);
+
+  // Deliberately narrower than `lists`: depending on the whole object would
+  // restart the timer below on every fetching/error flag change, which could
+  // postpone the skeleton indefinitely during a slow load.
+  const activeListLoaded = lists[status].loaded;
+
+  // Start the skeleton's grace period for the active list. Cleared if the status
+  // changes or the component unmounts. A stuck skeleton is impossible by
+  // construction: the flag only ever *permits* a skeleton, and the render
+  // condition also requires the list to still be unloaded, so data arriving
+  // during the timeout wins regardless of when the timer fires.
+  useEffect(() => {
+    if (activeListLoaded || skeletonDelayPassed[status]) return;
+    const timer = setTimeout(() => {
+      setSkeletonDelayPassed((prev) => (prev[status] ? prev : { ...prev, [status]: true }));
+    }, LOADING_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [status, activeListLoaded, skeletonDelayPassed]);
 
   // Load both lists once so tab counts and the inactive tab's grid are ready before it's opened.
   useEffect(() => {
@@ -256,9 +293,15 @@ export default function Home() {
   }, []);
 
   const current = lists[status];
-  const showSkeleton = !current.loaded;
-  const showError = current.loaded && current.error && current.titles.length === 0;
-  const showEmpty = current.loaded && !current.error && current.titles.length === 0;
+  const loaded = current.loaded;
+  // Every state below now gates on `loaded` explicitly rather than on
+  // `!showSkeleton`. Those used to be equivalent, but the skeleton delay
+  // introduced a third case (not loaded AND no skeleton yet), and inferring
+  // "loaded" from "no skeleton" would render the filtered-empty message during
+  // that window.
+  const showSkeleton = !loaded && skeletonDelayPassed[status];
+  const showError = loaded && current.error && current.titles.length === 0;
+  const showEmpty = loaded && !current.error && current.titles.length === 0;
   const counts = {
     WANT: lists.WANT.loaded ? lists.WANT.titles.length : null,
     WATCHED: lists.WATCHED.loaded ? lists.WATCHED.titles.length : null,
@@ -271,7 +314,12 @@ export default function Home() {
   const wantGenres = Array.from(new Set(lists.WANT.titles.flatMap((t) => t.genres))).sort();
   const activeGenre = status === "WANT" && genreFilter && wantGenres.includes(genreFilter) ? genreFilter : null;
   const activeType = status === "WANT" ? typeFilter : null;
-  const showFilterRow = status === "WANT" && !showSkeleton && !showError && !showEmpty;
+  // Rendered even while the list is loading, which it deliberately was not
+  // before. The three type chips need no data, so showing the row immediately
+  // keeps its ~40px out of the swap: it used to appear only once data landed and
+  // shoved the whole grid down. The genre chips still need the Want list, so they
+  // append horizontally when it arrives, which scrolls rather than reflows.
+  const showFilterRow = status === "WANT" && !showError && !showEmpty;
   const filteredTitles = current.titles.filter(
     (t) => (!activeGenre || t.genres.includes(activeGenre)) && (!activeType || t.mediaType === activeType),
   );
@@ -284,7 +332,7 @@ export default function Home() {
       : status === "WANT"
       ? sortWantByRating(filteredTitles)
       : sortWatchedByRating(filteredTitles);
-  const showFilteredEmpty = !showSkeleton && !showError && !showEmpty && displayTitles.length === 0;
+  const showFilteredEmpty = loaded && !showError && !showEmpty && displayTitles.length === 0;
   const typeLabel = (t: MediaKind) => (t === "MOVIE" ? "movies" : "series");
   const filteredEmptyMessage = activeType && activeGenre
     ? `No ${typeLabel(activeType)} in ${activeGenre} yet`
@@ -398,9 +446,31 @@ export default function Home() {
         </div>
       )}
       {showSkeleton ? (
-        <div className="mt-4 grid grid-cols-3 gap-3 sm:grid-cols-4" aria-hidden="true">
+        /* STRUCTURALLY IDENTICAL to the real grid below, because swapping
+           between two differently-sized layouts reflows the page and that reads
+           as jitter however fast the swap is. Matched: the mt-2 margin (was
+           mt-4, an 8px jump), the column counts, the gap, the tile aspect ratio,
+           and critically the two text lines TitleCard renders under each poster,
+           which the skeleton used to omit entirely — roughly 40px per row,
+           compounding down the grid.
+           The placeholder bars use &nbsp; inside the same element as the real
+           text, so the line box height comes from the real font metrics rather
+           than from a hand-picked pixel height that could drift from them. */
+        <div className="mt-2 grid grid-cols-3 gap-3 sm:grid-cols-4" aria-hidden="true">
           {[0, 1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
-            <div key={i} className="aspect-[2/3] w-full animate-pulse rounded-lg bg-gray-200 motion-reduce:animate-none dark:bg-white/10" />
+            <div key={i}>
+              <div className="aspect-[2/3] w-full animate-pulse rounded-lg bg-gray-200 motion-reduce:animate-none dark:bg-white/10" />
+              <p className="mt-1 truncate text-sm font-medium">
+                <span className="inline-block w-3/4 animate-pulse rounded bg-gray-200 align-middle motion-reduce:animate-none dark:bg-white/10">
+                  &nbsp;
+                </span>
+              </p>
+              <p className="mt-0.5 meta">
+                <span className="inline-block w-1/2 animate-pulse rounded bg-gray-200 align-middle motion-reduce:animate-none dark:bg-white/10">
+                  &nbsp;
+                </span>
+              </p>
+            </div>
           ))}
         </div>
       ) : showError ? (
@@ -437,7 +507,7 @@ export default function Home() {
           <p className="text-sm text-gray-500">{filteredEmptyMessage}</p>
         </div>
       ) : (
-        <div className={`mt-2 grid grid-cols-3 gap-3 sm:grid-cols-4${warmAtMount[status] ? "" : " fade-in"}`}>
+        <div className={`mt-2 grid grid-cols-3 gap-3 sm:grid-cols-4${warmAtMount[status] || diskSeeded ? "" : " fade-in"}`}>
           {displayTitles.map((t) => <TitleCard key={t.id} t={t} status={status} />)}
         </div>
       )}
