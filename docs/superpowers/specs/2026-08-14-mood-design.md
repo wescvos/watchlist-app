@@ -82,7 +82,7 @@ Two flows that never meet at request time. That separation is the whole design.
 TAGGING (write path, LLM, rare)
   add a title      → upsert Title → after() → tagIfUntagged(id)  → Gemini (1 title)
   refresh a title  → update Title → after() → tagIfUntagged(id)  → Gemini (1 title)
-  backfill script  → untagged WANT titles → batches of 20        → Gemini (16 calls)
+  backfill script  → untagged WANT titles → batches of 20        → Gemini (17 calls)
                                                                   ↓
                                               Title.moods = ["Tense & gripping", ...]
                                               Title.moodsTaggedAt = now()
@@ -279,11 +279,11 @@ JSON output against 8,192 is the constraint.**
 
 Output budget used = `N × (40 + 200)`, against 8,192.
 
-| N | Thinking + output | % of 8,192 | Headroom | Requests for 307 titles | Verdict |
+| N | Thinking + output | % of 8,192 | Headroom | Requests for 327 titles | Verdict |
 |---|---|---|---|---|---|
-| 16 | 3,840 | 47% | 53% | 20 | Rejected: exactly the daily cap, zero retry margin |
-| **20** | **4,800** | **59%** | **41%** | **16** | **Chosen** |
-| 25 | 6,000 | 73% | 27% | 13 | Workable, thinner output margin |
+| 16 | 3,840 | 47% | 53% | 21 | Rejected: over the daily cap outright |
+| **20** | **4,800** | **59%** | **41%** | **17** | **Chosen** |
+| 25 | 6,000 | 73% | 27% | 14 | Workable, thinner output margin |
 | 30 | 7,200 | 88% | 12% | 11 | Rejected: this is the starvation shape that emptied recommend responses |
 
 **Decision: `TAG_BATCH_SIZE = 20`.**
@@ -299,18 +299,26 @@ Studio limits at implementation time; if the number has changed, only this
 subsection's conclusion changes, not the batch size).
 
 ```
-Want titles to tag        ≈ 307
-Batch size                  20
-Requests needed    ceil(307 / 20) = 16
-Free-tier daily cap         20
-Spare                       4
+Want titles to tag          327   (measured, Task 2)
+Batch size                   20
+Requests needed    ceil(327 / 20) = 17
+Free-tier daily cap          20
+Spare                         3
 ```
 
-**Yes.** A full backfill of the ~307 Want titles takes **16 requests and fits in
-a single day**, leaving **4 requests spare** for retrying failed batches.
+**Yes.** A full backfill of the 327 Want titles takes **17 requests and fits in
+a single day**, leaving **3 requests spare** for retrying failed batches.
+
+Note what does *not* fit: the library is **531 titles** in total (327 Want, 204
+Watched), and tagging all of them would be `ceil(531 / 20)` = **27 requests**,
+comfortably over the daily cap. Want-first ordering is therefore not a nicety,
+it is what keeps the browsable set inside one day's quota. The Watched
+remainder tags itself over subsequent days, or on demand, and nothing depends
+on it until mood browsing extends to Watched (section 15).
 
 Sensitivity worth knowing: at N = 20 the one-day backfill holds up to **400
-titles** (20 requests × 20 titles). Past that it spans two days, which costs
+titles** (20 requests of 20 titles), so 327 leaves 73 titles of headroom before
+the Want list alone needs a second day. Past that it spans two days, which costs
 nothing extra because the script is resumable by construction (it selects
 `moodsTaggedAt IS NULL`, so re-running continues rather than restarts).
 
@@ -331,13 +339,13 @@ before the backfill gets any, and it exists exactly once.
 
 The `moodsTaggedAt IS NULL` gate is what normally keeps tagging bounded, because
 an already-tagged title never calls Gemini again. But **before the first backfill
-runs, every title in the library is untagged**, so the gate is open on all ~307
+runs, every title in the library is untagged**, so the gate is open on all 531
 of them. The staleness auto-refresh in `src/app/title/[id]/page.tsx` re-fetches
 any title older than 30 days on view, and once tagging is wired into that path it
 also fires one tagging request per stale title viewed. Opening roughly twenty
 stale titles would therefore consume the entire 20-request daily allowance, one
 title at a time, and the backfill would then fail on rate limits with nothing
-left for its 16 batches.
+left for its 17 batches.
 
 The mitigation is operational, not architectural, because the exposure is
 one-time and the alternative (suppressing incremental tagging until some
@@ -374,7 +382,7 @@ a mood tag is cached metadata like `genres`, which has no provenance column
 either. If a prompt revision ever requires a full re-tag, the operation is
 "clear `moodsTaggedAt` and re-run the backfill," which needs no extra column.
 
-**No index on `moods`.** A `has` filter over ~307 rows is a trivial sequential
+**No index on `moods`.** A `has` filter over ~530 rows is a trivial sequential
 scan, and neither `genres` nor `spokenLanguages` is indexed. A GIN index is a
 one-line addition if the library ever grows by an order of magnitude.
 
@@ -385,18 +393,27 @@ even `--create-only`), and applied by `prisma migrate deploy`, which
 `npm run build` already runs:
 
 ```bash
+npx prisma migrate status          # must be clean, so the committed schema is a valid baseline
+git show HEAD:prisma/schema.prisma > /tmp/base-schema.prisma
 npx prisma migrate diff \
-  --from-migrations prisma/migrations \
-  --to-schema-datamodel prisma/schema.prisma \
+  --from-schema /tmp/base-schema.prisma \
+  --to-schema prisma/schema.prisma \
   --script > prisma/migrations/<timestamp>_add_moods/migration.sql
 ```
 
-Expected output, matching the `add_spoken_languages` migration's shape exactly:
+On Prisma 7, `--to-schema-datamodel` no longer exists and `--from-migrations`
+requires a `shadowDatabaseUrl`, so the baseline comes from git instead: local,
+read-only, no connection. Cross-check the result against
+`prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --script`
+(also read-only) so the substitution is validated rather than assumed.
+
+Output, matching the `add_spoken_languages` migration's shape (Prisma emits one
+`ALTER TABLE` with two clauses):
 
 ```sql
 -- AlterTable
-ALTER TABLE "Title" ADD COLUMN     "moods" TEXT[];
-ALTER TABLE "Title" ADD COLUMN     "moodsTaggedAt" TIMESTAMP(3);
+ALTER TABLE "Title" ADD COLUMN     "moods" TEXT[],
+ADD COLUMN     "moodsTaggedAt" TIMESTAMP(3);
 ```
 
 Both are additive and nullable, so existing rows are untouched. As with
@@ -456,7 +473,7 @@ Differences specific to tagging:
 - **Prints the running request count** as it goes (`request 7/16, 13 of the 20 daily budget used`), so remaining quota is visible during the run rather than worked out afterwards.
 - Takes an optional `--limit N` (batches, not titles) so a run can be kept inside the remaining daily request budget.
 - Stops early and says so on a `rate_limit` error, rather than grinding through sixteen guaranteed failures.
-- Needs no inter-request delay for rate-limit reasons the way the TMDb/OMDb scripts do (16 requests total, not 307), but keeps a small pause for tidiness.
+- Needs no inter-request delay for rate-limit reasons the way the TMDb/OMDb scripts do (17 requests total, not 327), but keeps a small pause for tidiness.
 
 ## 10. Error handling and degradation
 
@@ -496,7 +513,7 @@ its own. For that interval Home simply has one action button instead of two.
 ### `/mood`: the picker
 
 A **server component**. One query fetches `{ id, moods, moodsTaggedAt }` for all
-Want titles (~307 rows), and counts are computed in JavaScript. That is one
+Want titles (327 rows), and counts are computed in JavaScript. That is one
 query total, not eleven, and no `groupBy` gymnastics.
 
 Visually, the app's restrained mono/editorial vocabulary: a grid of text tiles,

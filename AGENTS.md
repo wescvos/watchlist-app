@@ -27,6 +27,7 @@ This version has breaking changes — APIs, conventions, and file structure may 
 ## Database
 
 - Generate migrations with `prisma migrate diff ... --script` (read-only). NEVER `migrate dev`, not even `--create-only`: it applies already-pending migrations to the connected DB as a side effect.
+- Prisma 7: `--to-schema-datamodel` is removed (use `--from-schema`/`--to-schema`), and `--from-migrations` now requires a shadow database. If `--from-migrations` fails, diff schema-to-schema against `git show HEAD:prisma/schema.prisma` (read-only, no connection), and confirm `migrate status` is clean first so the committed schema is a valid baseline. Never fall back to `migrate dev`.
 - Vercel's `DATABASE_URL` must be the DIRECT Neon string (no `-pooler`) and must NOT be marked Sensitive. Either one causes intermittent build failures.
 
 ## Gemini
