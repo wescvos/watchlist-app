@@ -40,7 +40,7 @@ beforeEach(() => {
 });
 
 describe("/mood picker", () => {
-  it("renders all eleven moods in canonical order", async () => {
+  it("renders all twelve moods in canonical order", async () => {
     mock(prisma.title.findMany).mockResolvedValue([]);
 
     const { container } = render(await MoodPage());
@@ -55,8 +55,8 @@ describe("/mood picker", () => {
 
   it("counts each mood from a single query", async () => {
     mock(prisma.title.findMany).mockResolvedValue([
-      pickerRow(["Tense & gripping", "Dark & heavy"]),
-      pickerRow(["Tense & gripping"]),
+      pickerRow(["Slow-burn dread", "Dark & heavy"]),
+      pickerRow(["Slow-burn dread"]),
       pickerRow(["Weird"]),
     ]);
 
@@ -64,8 +64,8 @@ describe("/mood picker", () => {
 
     // One query for the whole screen, not one per mood.
     expect(prisma.title.findMany).toHaveBeenCalledTimes(1);
-    const tense = screen.getByText("Tense & gripping").closest("a")!;
-    expect(tense).toHaveTextContent("2");
+    const dread = screen.getByText("Slow-burn dread").closest("a")!;
+    expect(dread).toHaveTextContent("2");
     expect(screen.getByText("Dark & heavy").closest("a")).toHaveTextContent("1");
   });
 
@@ -131,9 +131,9 @@ describe("/mood/[slug] grid", () => {
   it("renders one card per matching title, linking to the detail page", async () => {
     mock(prisma.title.findMany).mockResolvedValue([cardRow(1), cardRow(2)]);
 
-    const { container } = render(await MoodTitlesPage({ params: params("tense-gripping") }));
+    const { container } = render(await MoodTitlesPage({ params: params("edge-of-seat") }));
 
-    expect(screen.getByText("Tense & gripping")).toBeInTheDocument();
+    expect(screen.getByText("Edge-of-seat")).toBeInTheDocument();
     expect(screen.getByText("2 titles")).toBeInTheDocument();
     const hrefs = Array.from(container.querySelectorAll("a[href^='/title/']")).map((a) =>
       a.getAttribute("href"),
@@ -166,6 +166,15 @@ describe("/mood/[slug] grid", () => {
     mock(prisma.title.findMany).mockResolvedValue([cardRow(1)]);
     render(await MoodTitlesPage({ params: params("weird") }));
     expect(screen.getByText("1 title")).toBeInTheDocument();
+  });
+
+  it("calls notFound for the retired tense-gripping slug", async () => {
+    // The mood was split into Slow-burn dread and Edge-of-seat; its old URL
+    // must 404 rather than silently render an empty grid.
+    await MoodTitlesPage({ params: params("tense-gripping") }).catch(() => {});
+
+    expect(notFoundSpy).toHaveBeenCalled();
+    expect(prisma.title.findMany).not.toHaveBeenCalled();
   });
 
   it("calls notFound for an unknown slug, without querying", async () => {

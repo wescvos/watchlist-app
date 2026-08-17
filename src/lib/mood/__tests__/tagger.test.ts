@@ -89,10 +89,10 @@ describe("truncateOverview", () => {
 describe("buildTagPrompt", () => {
   const batch = [taggable({ index: 0 }), taggable({ index: 1 })];
 
-  it("names all eleven moods with their definitions", () => {
+  it("names all twelve moods with their definitions", () => {
     const prompt = buildTagPrompt(batch);
     for (const label of MOOD_LABELS) expect(prompt).toContain(label);
-    expect(MOOD_LABELS).toHaveLength(11);
+    expect(MOOD_LABELS).toHaveLength(12);
   });
 
   it("carries the Conceptual operative test and its counter-examples", () => {
@@ -111,7 +111,31 @@ describe("buildTagPrompt", () => {
   it("shows that multi-tagging is correct", () => {
     const prompt = buildTagPrompt(batch);
     expect(prompt).toContain("Perfect Blue");
-    expect(prompt).toContain("Parasite");
+    expect(prompt).toContain("Hereditary");
+  });
+
+  it("separates the two halves of the old Tense & gripping mood", () => {
+    // Split because one mood covering both registers matched half the library.
+    // Without these lines the tagger double-tags and the split buys nothing.
+    const prompt = buildTagPrompt(batch);
+    expect(prompt).toContain("Slow-burn dread");
+    expect(prompt).toContain("Edge-of-seat");
+    expect(prompt).toContain("DIFFERENT APPETITES");
+    expect(prompt).toContain("PREFER ONE");
+    expect(prompt).toContain("Assigning both by default is WRONG");
+    // And no longer offers the mood they replaced.
+    expect(prompt).not.toContain("Tense & gripping");
+  });
+
+  it("separates Slow-burn dread from Scary, which is horror mechanics", () => {
+    const prompt = buildTagPrompt(batch);
+    expect(prompt).toContain("MADE TO FRIGHTEN");
+    expect(prompt).toContain("carry dread with no horror");
+  });
+
+  it("separates Edge-of-seat from Big & thrilling, which is scale", () => {
+    const prompt = buildTagPrompt(batch);
+    expect(prompt).toContain("Uncut Gems is Edge-of-seat, not Big & thrilling");
   });
 
   it("sends ONLY the whitelisted fields, never personal data (privacy)", () => {
@@ -154,13 +178,13 @@ describe("parseMoodTaggings", () => {
   it("maps a well-formed response to canonical labels", () => {
     const out = parseMoodTaggings(
       [
-        { index: 0, title: "Parasite", moods: ["Tense & gripping", "Dark & heavy"] },
+        { index: 0, title: "Parasite", moods: ["Edge-of-seat", "Dark & heavy"] },
         { index: 1, title: "Primer", moods: ["Conceptual", "Thoughtful"] },
       ],
       batch,
     );
     expect(out).toEqual([
-      { index: 0, moods: ["Tense & gripping", "Dark & heavy"] },
+      { index: 0, moods: ["Edge-of-seat", "Dark & heavy"] },
       { index: 1, moods: ["Conceptual", "Thoughtful"] },
     ]);
   });
@@ -214,10 +238,10 @@ describe("parseMoodTaggings", () => {
 
   it("drops an unknown mood individually and keeps the valid ones", () => {
     const out = parseMoodTaggings(
-      [{ index: 0, title: "Parasite", moods: ["Tense & gripping", "Melancholy", "Vibes"] }],
+      [{ index: 0, title: "Parasite", moods: ["Edge-of-seat", "Melancholy", "Vibes"] }],
       batch,
     );
-    expect(out).toEqual([{ index: 0, moods: ["Tense & gripping"] }]);
+    expect(out).toEqual([{ index: 0, moods: ["Edge-of-seat"] }]);
   });
 
   it("collapses duplicate moods", () => {

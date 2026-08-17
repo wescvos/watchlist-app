@@ -9,7 +9,7 @@
 
 A "Mood" screen, reached from a nav entry where "For You" currently sits, that
 answers one question: *"I want something \_\_\_\_, what's on my list?"* It shows a
-grid of eleven moods; tapping one shows every title on the **Want to watch** list
+grid of twelve moods; tapping one shows every title on the **Want to watch** list
 carrying that mood, as an ordinary poster grid.
 
 Moods are **pre-tagged onto titles and stored.** Browsing is a plain database
@@ -24,8 +24,8 @@ index instead of in front of the user in real time.
 
 ## 2. Core use cases
 
-- Open Mood, see eleven moods with a count of matching Want titles on each.
-- Tap "Tense & gripping", see all matching Want titles as a poster grid, instantly.
+- Open Mood, see twelve moods with a count of matching Want titles on each.
+- Tap "Slow-burn dread", see all matching Want titles as a poster grid, instantly.
 - Tap a poster, land on the existing title detail page.
 - Add a title normally, and have it tagged without doing anything extra.
 - Run a one-off backfill so the existing Want list becomes browsable.
@@ -84,12 +84,12 @@ TAGGING (write path, LLM, rare)
   refresh a title  → update Title → after() → tagIfUntagged(id)  → Gemini (1 title)
   backfill script  → untagged WANT titles → batches of 20        → Gemini (17 calls)
                                                                   ↓
-                                              Title.moods = ["Tense & gripping", ...]
+                                              Title.moods = ["Slow-burn dread", ...]
                                               Title.moodsTaggedAt = now()
 
 BROWSING (read path, no LLM, every time)
   /mood            → one query over WANT titles → count per mood → picker grid
-  /mood/[slug]     → WHERE status='WANT' AND moods @> ARRAY['Tense & gripping']
+  /mood/[slug]     → WHERE status='WANT' AND moods @> ARRAY['Slow-burn dread']
                    → poster grid of TitleCard
 ```
 
@@ -97,28 +97,43 @@ The browse path is server-rendered from Postgres. It makes no LLM call, no
 network call, and no client-side fetch, so it cannot rate-limit, cannot fail
 mid-render, and cannot flash (section 11).
 
-## 5. The eleven moods
+## 5. The twelve moods
 
 Framed as "I want something…", describing **what you want to watch**, not how
-you currently feel. The set is closed at eleven, in this canonical order:
+you currently feel. The set is closed at twelve, in this canonical order:
 
 | # | Mood | Working definition for the tagger |
 |---|---|---|
 | 1 | **Light & funny** | Comedic and low-stakes. The laughs are the point; you can watch it tired. |
 | 2 | **Feel-good** | Warm and uplifting; it leaves you better than it found you. May be dramatic, but the arc resolves kindly. |
-| 3 | **Tense & gripping** | Sustained suspense or pressure that makes it hard to look away. Thrillers, heists, slow-burn dread. |
-| 4 | **Dark & heavy** | Bleak, grim, or emotionally punishing. You have to be in the mood for it. |
-| 5 | **Thoughtful** | Slow, meditative, cerebral **in tone and pace**. Rewards patience and attention. |
-| 6 | **Beautiful & calm** | Visually gorgeous and unhurried. The images and atmosphere are the draw. |
-| 7 | **Weird** | Surreal, offbeat, formally strange **in execution**. Dream logic, absurdism, tonal oddity. |
-| 8 | **Big & thrilling** | Spectacle, scale, momentum, action. Blockbuster energy. |
-| 9 | **Romantic** | A central love story drives the film. |
-| 10 | **Scary** | Made to frighten. Horror, dread, terror. |
-| 11 | **Conceptual** | See section 5.1. Tightly bounded, because it is the one that over-tags. |
+| 3 | **Slow-burn dread** | Unease that accumulates. The menace is atmospheric and patient; you feel the threat before you see it. Deliberate pace, mounting wrongness. Examples: Hereditary, The Witch, Burning, First Reformed, Under the Skin, Zodiac, Michael Clayton. |
+| 4 | **Edge-of-seat** | Momentum and urgency. Propulsive, escalating, hard to pause. The pressure comes from pace and stakes rather than atmosphere. Examples: Sicario, Uncut Gems, Run Lola Run, Heat, Nightcrawler, Prisoners. |
+| 5 | **Dark & heavy** | Bleak, grim, or emotionally punishing. You have to be in the mood for it. |
+| 6 | **Thoughtful** | Slow, meditative, cerebral **in tone and pace**. Rewards patience and attention. |
+| 7 | **Beautiful & calm** | Visually gorgeous and unhurried. The images and atmosphere are the draw. |
+| 8 | **Weird** | Surreal, offbeat, formally strange **in execution**. Dream logic, absurdism, tonal oddity. |
+| 9 | **Big & thrilling** | Spectacle, scale, action. Blockbuster energy. This is scope and budget, whereas Edge-of-seat is tension and stakes at any size: Uncut Gems is Edge-of-seat, NOT Big & thrilling. |
+| 10 | **Romantic** | A central love story drives the film. |
+| 11 | **Scary** | Made to frighten. Horror, dread, terror. |
+| 12 | **Conceptual** | See section 5.1. Tightly bounded, because it is the one that over-tags. |
 
-Definitions 1 to 10 are deliberately one line each. Conceptual gets a full
-block because it is the only mood whose failure mode is enthusiastic
-over-application.
+Most definitions are one line. Three carry more, and each for a reason:
+Conceptual because its failure mode is enthusiastic over-application (section
+5.1), and **Slow-burn dread** and **Edge-of-seat** because they are the pair most
+at risk of being double-tagged into uselessness (section 5.4).
+
+### 5.0 Why "Tense & gripping" became two moods
+
+The original set had a single **Tense & gripping**, and the first full backfill
+gave it to **165 of 327** Want titles. The genre cross-check showed that tracked
+the library's skew rather than over-tagging (92% of the Want list carries a
+Drama, Thriller, Crime, Horror, Mystery or War genre), so the tagger was not
+misbehaving. But a filter that returns half the list is not filtering.
+
+The fix is a sharper distinction in that region, not a tagging correction. One
+mood was covering two genuinely different appetites: patient atmospheric menace,
+and propulsive urgency. Splitting them gives two useful filters where there was
+one useless one. They sit adjacent, in the slot the single mood held.
 
 ### 5.1 Conceptual (tight definition)
 
@@ -155,16 +170,19 @@ synonyms. They are separate axes, each judged on its own criteria.
 
 ### 5.3 Multi-tagging is correct
 
-Titles carry **multiple** moods. Parasite is Tense & gripping + Dark & heavy +
-Thoughtful. That is the expected shape, not a tagging error.
+Titles carry **multiple** moods. Hereditary is Slow-burn dread + Scary + Dark &
+heavy. That is the expected shape, not a tagging error.
 
 Worked examples for the prompt:
 
 - **Primer** = Conceptual + Thoughtful
-- **Perfect Blue** = Conceptual + Weird + Tense & gripping
 - **Palm Springs** = Conceptual + Light & funny (not Thoughtful)
 - **Arrival** = Conceptual + Thoughtful (not Weird)
-- **Parasite** = Tense & gripping + Dark & heavy + Thoughtful
+- **Perfect Blue** = Conceptual + Weird + Slow-burn dread (mounting paranoia, not propulsion)
+- **Hereditary** = Slow-burn dread + Scary + Dark & heavy (horror, so dread AND Scary)
+- **Michael Clayton** = Slow-burn dread + Thoughtful (dread with no horror, so not Scary)
+- **Uncut Gems** = Edge-of-seat + Dark & heavy (relentless pressure on a small scale, so not Big & thrilling)
+- **Heat** = Edge-of-seat + Big & thrilling (propulsive and genuinely large in scope)
 
 Typical output is 1 to 4 moods per title. The instruction is "assign every mood
 that genuinely applies, and no mood that merely partly fits." No hard per-title
@@ -172,6 +190,21 @@ cap is enforced in validation, because a legitimate five-mood title should not
 be silently truncated; the count is a prompt instruction, not a constraint.
 
 **A title matching no mood at all is allowed** (section 10).
+
+### 5.4 Slow-burn dread is not Edge-of-seat, and neither is Scary
+
+Splitting one mood into two only helps if the tagger keeps them apart. Tag both
+by default and half the library carries both, which reproduces exactly the
+problem the split was meant to solve. Three rules, all in the prompt:
+
+| Pair | Rule |
+|---|---|
+| **Slow-burn dread vs Edge-of-seat** | **Different appetites, not synonyms. PREFER ONE.** The test is which register *dominates the viewing experience*. Assigning both by default is **wrong**. Both is correct only where a film genuinely sustains both registers throughout (Sicario arguably does; most do not). |
+| **Slow-burn dread vs Scary** | Scary means **made to frighten**, with horror mechanics. Dread is a **tone**, and frequently not horror at all: Michael Clayton, First Reformed and Zodiac carry dread with no horror. A horror film may carry both; a paranoid thriller carries dread without Scary. |
+| **Edge-of-seat vs Big & thrilling** | Big & thrilling is **spectacle and scale** (blockbuster energy). Edge-of-seat is **tension and stakes regardless of budget**. Uncut Gems is Edge-of-seat, not Big & thrilling. Heat is both. |
+
+These live in `MOOD_DISAMBIGUATION` in `src/lib/moods.ts`, next to the
+definitions so the two cannot drift, and each is asserted by a prompt test.
 
 ## 6. What the LLM returns
 
@@ -205,7 +238,7 @@ cost that drives section 7's arithmetic.
 interface RawMoodTagging {
   index: number;      // echoed back, maps to the request batch
   title: string;      // echoed back, used only as a cross-check
-  moods: string[];    // zero or more of the eleven exact labels
+  moods: string[];    // zero or more of the twelve exact labels
 }
 ```
 
@@ -219,7 +252,7 @@ interface RawMoodTagging {
     properties: {
       index: { type: "integer" },
       title: { type: "string" },
-      moods: { type: "array", items: { type: "string", enum: [ ...the 11 labels ] } }
+      moods: { type: "array", items: { type: "string", enum: [ ...the 12 labels ] } }
     },
     required: ["index", "moods"]
   }
@@ -236,7 +269,7 @@ the guarded parsing discipline from `gemini.ts` (section 12). Per entry:
 
 - `index` must be an integer within the batch range. Out of range, drop the entry.
 - `title` if present must be a close match for the batch entry at that index. A mismatch means the model lost alignment, so drop the entry rather than write moods onto the wrong film.
-- `moods` must be an array. Each element is matched **exactly** against the eleven canonical labels; unknown strings are dropped individually, and duplicates collapse. An entry whose moods all get dropped becomes a legitimate empty result, not a failure.
+- `moods` must be an array. Each element is matched **exactly** against the twelve canonical labels; unknown strings are dropped individually, and duplicates collapse. An entry whose moods all get dropped becomes a legitimate empty result, not a failure.
 - Entries missing from the response are simply left untagged; the next backfill run picks them up, because the backfill selects on `moodsTaggedAt IS NULL`.
 
 **Drop-invalid-but-keep-valid**, exactly as the recommend parser did: one
@@ -273,7 +306,7 @@ JSON output against 8,192 is the constraint.**
 | Input, per title | ~150 tokens | title ~8, year ~3, mediaType ~2, genres ~12, overview 400 chars ~100, JSON punctuation ~10, rounded up |
 | Input, fixed preamble | ~1,200 tokens | instructions ~200, ten short mood definitions ~500, the Conceptual block (915 characters, ~230), schema and formatting overhead |
 | Output, per title | ~40 tokens | echoed title ~8, 2.5 moods average at ~5 each ~13, punctuation ~10, rounded up |
-| Thinking, per title | ~200 tokens | deliberately pessimistic: eleven criteria weighed per title. The observed 1,000 to 1,600 for one 12-item generative call is well under this per unit of work |
+| Thinking, per title | ~200 tokens | deliberately pessimistic: twelve criteria weighed per title. The observed 1,000 to 1,600 for one 12-item generative call is well under this per unit of work |
 
 ### Candidate batch sizes
 
@@ -408,7 +441,7 @@ model Title {
 }
 ```
 
-- **`moods`** is a native Postgres `TEXT[]` exposed as Prisma `String[]`, mirroring `genres` and `spokenLanguages` exactly, as required. It stores the **canonical labels** ("Tense & gripping"), not slugs, because that is how `genres` stores its values and because validation guarantees only the eleven exact labels are ever written.
+- **`moods`** is a native Postgres `TEXT[]` exposed as Prisma `String[]`, mirroring `genres` and `spokenLanguages` exactly, as required. It stores the **canonical labels** ("Slow-burn dread"), not slugs, because that is how `genres` stores its values and because validation guarantees only the twelve exact labels are ever written.
 - **`moodsTaggedAt`** exists because `moods = []` is otherwise ambiguous: it cannot distinguish "we asked the model and it legitimately matched no mood" (section 10) from "never tagged." Every consumer needs that distinction: the backfill uses it to select work, the incremental tagger uses it for idempotency, and the screen uses it for the untagged count. It is the one field carrying its weight beyond mirroring `genres`.
 
 **Deliberately not added:** a `moodsModel` provenance column. `RecommendationSet`
@@ -462,7 +495,7 @@ edited wrongly).
 
 ## 9. When tagging happens
 
-`src/lib/moods.ts` is the single source of truth for the eleven moods (label +
+`src/lib/moods.ts` is the single source of truth for the twelve moods (label +
 slug), imported by the tagger, the validator, the picker, and the route.
 
 | Trigger | Behaviour |
@@ -521,7 +554,7 @@ Nothing here is on a user-blocking path, which is the point of pre-tagging.
 | **Gemini fails, times out, or rate-limits during add or refresh** | Logged server-side and swallowed. The title stays untagged, the user's action already succeeded (it ran inside `after()`), and the backfill picks it up later. Never surfaced in the UI. |
 | **Gemini returns malformed or truncated JSON** | The batch is a failure; the script records it and continues to the next batch. Those titles stay untagged. Reuses the existing breadcrumb logging (`finishReason` + `thoughts`/`candidates` token counts), which is precisely what catches a recurrence of thinking-token starvation. |
 | **A response entry is malformed or misaligned** | That entry is dropped; the rest of the batch still writes (section 6). |
-| **An unknown mood string comes back** | Dropped individually against the canonical eleven. A title whose every mood was invalid ends up as a legitimate empty tagging. |
+| **An unknown mood string comes back** | Dropped individually against the canonical twelve. A title whose every mood was invalid ends up as a legitimate empty tagging. |
 | **A mood has no matching titles** | Clean empty state on the mood screen, not an error. The picker shows a `0` count, and a zero-count mood tile is visibly de-emphasised so the user rarely taps into an empty screen. |
 | **An unknown mood slug in the URL** | `notFound()`. |
 
@@ -549,7 +582,7 @@ its own. For that interval Home simply has one action button instead of two.
 
 A **server component**. One query fetches `{ id, moods, moodsTaggedAt }` for all
 Want titles (327 rows), and counts are computed in JavaScript. That is one
-query total, not eleven, and no `groupBy` gymnastics.
+query total, not twelve, and no `groupBy` gymnastics.
 
 Visually, the app's restrained mono/editorial vocabulary: a grid of text tiles,
 each with the mood label and its count in the existing `meta` style. **No
@@ -686,7 +719,7 @@ the untagged count.
 
 - **Phase 1: Remove For You, extract the Gemini client.** Extract `src/lib/gemini/client.ts` with ported tests, then delete the recommend feature's code and tests. The "For You" nav entry is removed outright, with no replacement.
 - **Phase 2: Schema and migration.** `moods` + `moodsTaggedAt`, migration by the diff method, verify only two `ADD COLUMN` statements.
-- **Phase 3: Tagging service.** `src/lib/moods.ts` canonical list, the prompt with all eleven definitions, batching at 20, validation, unit tests against a mocked client.
+- **Phase 3: Tagging service.** `src/lib/moods.ts` canonical list, the prompt with all twelve definitions, batching at 20, validation, unit tests against a mocked client.
 - **Phase 4: Triggers and backfill.** `after()`-scheduled tagging on add and refresh gated on `moodsTaggedAt`, plus `scripts/tag-all-moods.ts`. Deploy on a fresh daily quota and run the real backfill without browsing in between.
 - **Phase 5: The screens and the nav entry.** `/mood` picker, `/mood/[slug]` grid, the "Mood" nav entry added alongside them, `TitleCard` reused as-is.
 - **Phase 6: Polish and phone check.** Counts, empty states, untagged count, tap targets, on-device verification.

@@ -1,5 +1,5 @@
 /**
- * The eleven moods, and the ONLY place any of them is spelled out.
+ * The twelve moods, and the ONLY place any of them is spelled out.
  *
  * The tagger's prompt, the response validator, the mood picker, and the
  * /mood/[slug] route all read from here. Nothing else may hardcode a label or a
@@ -8,6 +8,12 @@
  *
  * Framing is "I want something…", describing what you want to WATCH, not how
  * you currently feel.
+ *
+ * CHANGING A LABEL REQUIRES A FULL RE-TAG. Stored rows hold the old string, and
+ * every title was judged against the whole vocabulary, so a title tagged under
+ * an older set was never offered the new options. Re-tagging only the rows that
+ * carried a removed label would leave the library inconsistent. See the
+ * implementation plan's re-tag procedure.
  */
 
 export interface Mood {
@@ -34,11 +40,25 @@ export const MOODS: readonly Mood[] = [
     definition:
       "Warm and uplifting; it leaves you better than it found you. May be dramatic, but the arc resolves kindly.",
   },
+  // "Tense & gripping" used to sit here alone and came back on 165 of 327 Want
+  // titles. That tracked the library's genre skew rather than over-tagging, but
+  // a filter returning half the list is not filtering. Splitting it into two
+  // distinct appetites is the fix: the region needed a sharper distinction, not
+  // a tagging correction. They stay adjacent, in the slot the single mood held.
   {
-    label: "Tense & gripping",
-    slug: "tense-gripping",
+    label: "Slow-burn dread",
+    slug: "slow-burn-dread",
     definition:
-      "Sustained suspense or pressure that makes it hard to look away. Thrillers, heists, slow-burn dread.",
+      "Unease that accumulates. The menace is atmospheric and patient; you feel the threat before you see it. " +
+      "Deliberate pace, mounting wrongness. Examples: Hereditary, The Witch, Burning, First Reformed, " +
+      "Under the Skin, Zodiac, Michael Clayton.",
+  },
+  {
+    label: "Edge-of-seat",
+    slug: "edge-of-seat",
+    definition:
+      "Momentum and urgency. Propulsive, escalating, hard to pause. The pressure comes from pace and stakes " +
+      "rather than atmosphere. Examples: Sicario, Uncut Gems, Run Lola Run, Heat, Nightcrawler, Prisoners.",
   },
   {
     label: "Dark & heavy",
@@ -67,7 +87,9 @@ export const MOODS: readonly Mood[] = [
   {
     label: "Big & thrilling",
     slug: "big-thrilling",
-    definition: "Spectacle, scale, momentum, action. Blockbuster energy.",
+    definition:
+      "Spectacle, scale, action. Blockbuster energy. This is about scope and budget, whereas Edge-of-seat is " +
+      "tension and stakes at any size: Uncut Gems is Edge-of-seat, NOT Big & thrilling.",
   },
   {
     label: "Romantic",
@@ -116,14 +138,22 @@ export function moodByLabel(label: string): Mood | undefined {
 }
 
 /**
- * The disambiguation the tagger needs most. Conceptual sits next to Thoughtful
- * and Weird, and the common failure is treating the three as synonyms rather
- * than as separate axes. Kept next to the definitions so the two can't drift.
+ * The disambiguations the tagger needs most, for the two regions where moods sit
+ * close enough to be mistaken for synonyms. Kept next to the definitions so the
+ * two cannot drift.
+ *
+ * Region 1: Conceptual against Thoughtful and Weird.
+ * Region 2: Slow-burn dread against Edge-of-seat and Scary. Without this, the
+ * two halves of the old "Tense & gripping" get double-tagged and the split
+ * achieves nothing, since half the library would carry both.
  */
 export const MOOD_DISAMBIGUATION = [
   "Thoughtful is TONE AND PACE (slow, meditative). Conceptual films can be brisk and fun: Palm Springs is Conceptual but NOT Thoughtful.",
   "Weird is STRANGE EXECUTION (surreal, offbeat). Arrival is Conceptual but NOT Weird: conventional execution, extraordinary premise.",
   "Judge each mood on its own criteria. Do not treat Conceptual, Thoughtful, and Weird as interchangeable.",
+  "Slow-burn dread and Edge-of-seat are DIFFERENT APPETITES, not synonyms. PREFER ONE: ask which register dominates the viewing experience. Assigning both by default is WRONG. Both is correct only when a film genuinely sustains both registers throughout (Sicario arguably does; most do not).",
+  "Scary means MADE TO FRIGHTEN, with horror mechanics. Slow-burn dread is a TONE and is frequently not horror at all: Michael Clayton, First Reformed, and Zodiac carry dread with no horror. A horror film may carry both; a paranoid thriller carries dread without Scary.",
+  "Big & thrilling is SPECTACLE AND SCALE (blockbuster energy). Edge-of-seat is TENSION AND STAKES regardless of budget. Uncut Gems is Edge-of-seat, not Big & thrilling.",
 ] as const;
 
 /**
@@ -133,8 +163,11 @@ export const MOOD_DISAMBIGUATION = [
  */
 export const MOOD_EXAMPLES = [
   'Primer: ["Conceptual", "Thoughtful"]',
-  'Perfect Blue: ["Conceptual", "Weird", "Tense & gripping"]',
   'Palm Springs: ["Conceptual", "Light & funny"] (brisk and funny, so NOT Thoughtful)',
   'Arrival: ["Conceptual", "Thoughtful"] (conventional execution, so NOT Weird)',
-  'Parasite: ["Tense & gripping", "Dark & heavy", "Thoughtful"]',
+  'Perfect Blue: ["Conceptual", "Weird", "Slow-burn dread"] (mounting paranoia, not propulsion)',
+  'Hereditary: ["Slow-burn dread", "Scary", "Dark & heavy"] (horror, so dread AND Scary)',
+  'Michael Clayton: ["Slow-burn dread", "Thoughtful"] (dread with no horror, so NOT Scary)',
+  'Uncut Gems: ["Edge-of-seat", "Dark & heavy"] (relentless pressure on a small scale, so NOT Big & thrilling)',
+  'Heat: ["Edge-of-seat", "Big & thrilling"] (propulsive AND genuinely large in scope)',
 ] as const;
