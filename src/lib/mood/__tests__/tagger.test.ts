@@ -410,6 +410,18 @@ describe("tagTitles", () => {
     expect(result.tagged).toBe(1);
   });
 
+  it("gives the request far longer than the client's user-facing default", async () => {
+    // 20s aborted 4 of 5 batches on 2026-08-17 while one finished in ~18s, and an
+    // abort still spends the request. Nothing is waiting on this path.
+    mock(prisma.title.findMany).mockResolvedValue([row(0, { title: "Parasite" })]);
+    mock(generateJson).mockResolvedValue([{ index: 0, title: "Parasite", moods: ["Weird"] }]);
+
+    await tagTitles(["id0"], { delayMs: 0 });
+
+    const opts = mock(generateJson).mock.calls[0][0] as { timeoutMs?: number };
+    expect(opts.timeoutMs).toBeGreaterThanOrEqual(60_000);
+  });
+
   it("reports which model served the run", async () => {
     mock(prisma.title.findMany).mockResolvedValue([row(0, { title: "Parasite" })]);
     mock(generateJson).mockResolvedValue([{ index: 0, title: "Parasite", moods: ["Weird"] }]);

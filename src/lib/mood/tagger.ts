@@ -44,6 +44,15 @@ function sleep(ms: number): Promise<void> {
 // recommend path used 0.9, which was tuned for variety in invented picks.)
 const TEMPERATURE = 0.2;
 
+// The client's 20s default is sized for a user-facing path, where a hung request
+// must not hang a screen. Tagging has nobody waiting: it runs inside after() or
+// from a script. And 20s turned out to be marginal here, which is the worst
+// case: on 2026-08-17 four of five batches aborted at 20s while one finished in
+// ~18s, so a 20-title classification sits right on that edge. An abort still
+// spends the request, and Gemini may well have completed the work we walked away
+// from, so a short timeout burns quota to produce nothing. Be generous.
+const TAG_TIMEOUT_MS = 120_000;
+
 /** Exactly what leaves the app per title. Assembled explicitly; never a Title row. */
 export interface TaggableTitle {
   index: number;
@@ -79,6 +88,8 @@ export interface TagOptions {
   model?: string;
   /** Test seam, forwarded to the client. */
   retryDelaysMs?: number[];
+  /** Overrides TAG_TIMEOUT_MS. */
+  timeoutMs?: number;
 }
 
 // Stop a run when the model is simply down. On 2026-08-17 the alias rolled onto
@@ -287,6 +298,7 @@ export async function tagTitles(ids: string[], opts: TagOptions = {}): Promise<T
         expectArray: true,
         model: opts.model,
         retryDelaysMs: opts.retryDelaysMs,
+        timeoutMs: opts.timeoutMs ?? TAG_TIMEOUT_MS,
       });
       taggings = parseMoodTaggings(raw, batch);
       consecutiveFailures = 0;
