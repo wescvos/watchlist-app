@@ -37,6 +37,7 @@
  *   npx tsx scripts/tag-all-moods.ts            # Want only, rolling alias
  *   npx tsx scripts/tag-all-moods.ts --limit 5   # at most 5 batches
  *   npx tsx scripts/tag-all-moods.ts --budget 8  # spend at most 8 real requests
+ *   npx tsx scripts/tag-all-moods.ts --pace 5    # 5s between requests (Lite allows 15/min)
  *   npx tsx scripts/tag-all-moods.ts --all      # Want and Watched
  *   npx tsx scripts/tag-all-moods.ts --model gemini-3.6-flash   # pin this run
  *
@@ -73,6 +74,15 @@ function parseArgs(argv: string[]) {
     console.error("--limit needs a positive whole number of batches");
     process.exit(1);
   }
+  // Pacing is set by the model's per-minute cap, which differs by tier: full
+  // Flash allows 5/minute (hence the 15s default), while Lite allows 15/minute,
+  // so a Lite run can go roughly 3x faster without risking a 429.
+  const paceFlag = argv.indexOf("--pace");
+  const paceSeconds = paceFlag >= 0 ? Number(argv[paceFlag + 1]) : NaN;
+  if (paceFlag >= 0 && (!Number.isFinite(paceSeconds) || paceSeconds < 0)) {
+    console.error("--pace needs a non-negative number of seconds between requests");
+    process.exit(1);
+  }
   const budgetFlag = argv.indexOf("--budget");
   const budgetArg = budgetFlag >= 0 ? Number(argv[budgetFlag + 1]) : NaN;
   if (budgetFlag >= 0 && (!Number.isInteger(budgetArg) || budgetArg < 1)) {
@@ -84,6 +94,7 @@ function parseArgs(argv: string[]) {
     dryRun,
     model,
     limit: limitFlag >= 0 ? limit : null,
+    paceMs: paceFlag >= 0 ? Math.round(paceSeconds * 1000) : null,
     // Requests this run may spend, retries included. Defaults to the full daily
     // cap; pass a lower number when part of today's quota is already gone.
     budget: budgetFlag >= 0 ? budgetArg : DAILY_REQUEST_CAP,
@@ -91,7 +102,7 @@ function parseArgs(argv: string[]) {
 }
 
 async function main() {
-  const { all, dryRun, model, limit, budget } = parseArgs(process.argv.slice(2));
+  const { all, dryRun, model, limit, budget, paceMs } = parseArgs(process.argv.slice(2));
 
   // Dynamic import: prisma.ts reads process.env.DATABASE_URL at module scope,
   // so it must load after dotenv has populated process.env above — a static
@@ -124,12 +135,14 @@ async function main() {
   const plannedRequests = Math.ceil(targets.length / TAG_BATCH_SIZE);
 
   // Pacing means the run takes minutes; say so up front rather than looking hung.
-  const etaSeconds = Math.round(((plannedRequests - 1) * INTER_REQUEST_DELAY_MS) / 1000);
+  const delayMs = paceMs ?? INTER_REQUEST_DELAY_MS;
+  const etaSeconds = Math.round(((plannedRequests - 1) * delayMs) / 1000);
   console.log(`Model: ${servingModel}${servingModel === GEMINI_MODEL ? " (rolling alias)" : " (PINNED for this run)"}`);
   console.log(`Untagged ${scope} titles: ${untagged.length}`);
   console.log(`Tagging ${targets.length} of them in ${plannedRequests} request(s) of up to ${TAG_BATCH_SIZE}.`);
   console.log(
-    `Paced at ${INTER_REQUEST_DELAY_MS / 1000}s between requests to stay under the ${PER_MINUTE_CAP}/minute cap, ` +
+    `Paced at ${delayMs / 1000}s between requests` +
+      (paceMs === null ? ` to stay under the ${PER_MINUTE_CAP}/minute cap` : " (--pace override)") + ", " +
       `so expect at least ~${Math.floor(etaSeconds / 60)}m ${etaSeconds % 60}s plus response time.`,
   );
   // BATCHES ARE NOT REQUESTS. Every attempt is billable, so a batch costs 1
@@ -175,6 +188,7 @@ async function main() {
     {
       model,
       requestBudget: budget,
+      delayMs,
       onRequest: ({ requestNumber, totalRequests, batchSize, requestsSpent, elapsedMs, sinceLastMs }) => {
         const left = Math.max(0, budget - requestsSpent);
         const at = `t+${(elapsedMs / 1000).toFixed(0)}s`;
