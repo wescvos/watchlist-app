@@ -357,6 +357,68 @@ describe("/mood picker", () => {
   });
 });
 
+describe("/mood accessibility", () => {
+  it("announces each tile as a label plus a counted unit", async () => {
+    // The tile shows "Dark & heavy" above a bare "102", which reads as
+    // "Dark & heavy 102" with no unit unless the link carries its own name.
+    mock(prisma.title.findMany).mockResolvedValue([
+      pickerRow(["Dark & heavy"]),
+      pickerRow(["Dark & heavy"]),
+      pickerRow(["Weird"]),
+    ]);
+
+    render(await MoodPage());
+
+    expect(screen.getByRole("link", { name: "Dark & heavy, 2 titles" })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Weird, 1 title" })).toBeInTheDocument();
+  });
+
+  it("announces an empty mood as having no titles, not as a dash", async () => {
+    mock(prisma.title.findMany).mockResolvedValue([pickerRow(["Weird"])]);
+
+    render(await MoodPage());
+
+    const scary = screen.getByRole("link", { name: "Scary, no titles" });
+    expect(scary).toBeInTheDocument();
+    // The en dash stands in for a number visually and says nothing aloud.
+    expect(scary.querySelector("[aria-hidden='true']")?.textContent?.trim()).toBe("–");
+  });
+
+  it("gives every tile a keyboard focus ring and a real tap target", async () => {
+    mock(prisma.title.findMany).mockResolvedValue([pickerRow(["Weird"])]);
+
+    const { container } = render(await MoodPage());
+
+    const tiles = container.querySelectorAll("a[href^='/mood/']");
+    expect(tiles).toHaveLength(12);
+    for (const tile of tiles) {
+      // The codebase's standard treatment, not a bespoke one.
+      expect(tile.className).toContain("focus-visible:ring-foreground");
+      // 5.5rem = 88px, comfortably over the 44px minimum.
+      expect(tile.className).toContain("min-h-[5.5rem]");
+    }
+  });
+
+  it("keeps the poster backgrounds out of the accessibility tree", async () => {
+    mock(prisma.title.findMany).mockResolvedValue([
+      pickerRow(["Weird"], true, { posterUrl: poster(1) }),
+    ]);
+
+    const { container } = render(await MoodPage());
+
+    const img = container.querySelector("img")!;
+    // Decorative twice over: an empty alt, inside an aria-hidden wrapper.
+    expect(img).toHaveAttribute("alt", "");
+    expect(img.closest("[aria-hidden='true']")).not.toBeNull();
+  });
+
+  it("labels the back link", async () => {
+    mock(prisma.title.findMany).mockResolvedValue([]);
+    render(await MoodPage());
+    expect(screen.getByRole("link", { name: "Back to watchlist" })).toBeInTheDocument();
+  });
+});
+
 describe("/mood/[slug] grid", () => {
   const params = (slug: string) => Promise.resolve({ slug });
 

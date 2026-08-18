@@ -150,6 +150,18 @@ export default async function MoodPage() {
             <Link
               key={mood.slug}
               href={`/mood/${mood.slug}`}
+              // The visual tile reads "Dark & heavy" above a bare "102", which a
+              // screen reader announces as "Dark & heavy 102" with no unit, and
+              // for an empty mood as the label followed by a stray dash. An
+              // explicit name replaces both with something meaningful. The tap
+              // target is the whole tile (min-h 5.5rem, well over the 44px
+              // minimum) and the focus ring is the codebase's standard
+              // focus-visible:ring-foreground, both already on the className below.
+              aria-label={
+                count === 0
+                  ? `${mood.label}, no titles`
+                  : `${mood.label}, ${count} ${count === 1 ? "title" : "titles"}`
+              }
               className={`relative flex min-h-[5.5rem] flex-col justify-between overflow-hidden rounded-lg border border-black/12 p-3 transition-colors hover:bg-gray-100 active:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground dark:border-white/15 dark:hover:bg-white/10 dark:active:bg-white/10${
                 count === 0 ? " opacity-55" : ""
               }`}
@@ -182,7 +194,13 @@ export default async function MoodPage() {
                 {/* An empty category reads as a quiet dash. "NONE" looked like
                     an error rather than an empty shelf. The dash keeps the
                     baseline rhythm across all twelve tiles. */}
-                {count === 0 ? <span className="text-gray-400 dark:text-gray-500">–</span> : count}
+                {count === 0 ? (
+                  <span aria-hidden="true" className="text-gray-400 dark:text-gray-500">
+                    –
+                  </span>
+                ) : (
+                  count
+                )}
               </span>
             </Link>
           );
