@@ -71,6 +71,123 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+describe("the background revalidation is invisible when nothing changed", () => {
+  // MEASURED, not assumed. The launch sequence really does render the grid twice
+  // (once seeded from localStorage, once when the revalidation returns), and the
+  // question was whether that second render repaints. DOM mutation is the ground
+  // truth: if React changes nothing in the DOM, the browser has nothing to
+  // repaint. With an equivalent payload it changes NOTHING.
+  //
+  // This is a regression guard for two properties that make that true: cards are
+  // keyed by a stable id (so no remount, no image re-fetch) and the poster src is
+  // derived identically on both renders.
+  function watch(container: HTMLElement) {
+    const records: MutationRecord[] = [];
+    const observer = new MutationObserver((rs) => records.push(...rs));
+    observer.observe(container, { childList: true, subtree: true, attributes: true, characterData: true });
+    return { records, stop: () => observer.disconnect() };
+  }
+
+  /** A full Title row as /api/titles really returns it: card fields plus the rest. */
+  function fullRow(i: number, overrides: Record<string, unknown> = {}) {
+    return {
+      ...card(i),
+      tmdbId: 1000 + i, imdbId: `tt${i}`, backdropUrl: null, overview: "x".repeat(200),
+      tagline: null, runtime: 120, numberOfSeasons: null, numberOfEpisodes: null,
+      spokenLanguages: ["en"], cast: [], director: "D", watchProviders: [], watchLink: null,
+      tmdbScore: 7.1, rtScore: null, metacriticScore: null, status: "WANT", note: null,
+      moods: ["Weird"], pinnedAt: null, watchedAt: null,
+      ...overrides,
+    };
+  }
+
+  /** URL-aware, so each list revalidates against its OWN equivalent payload. */
+  function stubPerStatus(mutate?: (rows: Record<string, unknown>[]) => void) {
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => { release = r; });
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      await gate;
+      const watched = String(url).includes("WATCHED");
+      const rows = watched
+        ? [fullRow(100, { myRating: 8, status: "WATCHED" })]
+        : Array.from({ length: 12 }, (_, i) => fullRow(i));
+      if (!watched && mutate) mutate(rows);
+      return { ok: true, json: async () => rows } as unknown as Response;
+    }));
+    return () => release();
+  }
+
+  function seedDisk() {
+    persistLists({
+      WANT: { titles: Array.from({ length: 12 }, (_, i) => card(i)), loaded: true, fetching: false, error: false },
+      WATCHED: { titles: [card(100, { myRating: 8 })], loaded: true, fetching: false, error: false },
+    });
+  }
+
+  it("mutates NOTHING in the DOM when the revalidated data is equivalent", async () => {
+    seedDisk();
+    const release = stubPerStatus();
+
+    const { container } = render(<Home />);
+    await act(async () => { await Promise.resolve(); });
+
+    const srcsBefore = Array.from(container.querySelectorAll("img")).map((i) => i.getAttribute("src"));
+    const firstCard = container.querySelector("a[href^='/title/']");
+    expect(srcsBefore).toHaveLength(12);
+
+    const { records, stop } = watch(container);
+    await act(async () => {
+      release();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    stop();
+
+    // The headline: a second render that changes no pixels.
+    expect(records).toHaveLength(0);
+    // Why it changes nothing: identical srcs, and the same DOM nodes survive.
+    expect(Array.from(container.querySelectorAll("img")).map((i) => i.getAttribute("src"))).toEqual(srcsBefore);
+    expect(container.querySelector("a[href^='/title/']")).toBe(firstCard);
+  });
+
+  it("keys cards by a stable id, so a revalidation reconciles rather than remounts", async () => {
+    seedDisk();
+    const release = stubPerStatus();
+
+    const { container } = render(<Home />);
+    await act(async () => { await Promise.resolve(); });
+    const before = Array.from(container.querySelectorAll("a[href^='/title/']"));
+
+    await act(async () => { release(); await Promise.resolve(); await Promise.resolve(); });
+    const after = Array.from(container.querySelectorAll("a[href^='/title/']"));
+
+    // Index keys would rebuild these nodes and re-create every <img> with them.
+    expect(after).toHaveLength(before.length);
+    for (let i = 0; i < before.length; i++) expect(after[i]).toBe(before[i]);
+  });
+
+  it("still applies a genuine change, and touches only the affected card", async () => {
+    // The counterpart guard: silence on equivalence must not become blindness.
+    seedDisk();
+    const release = stubPerStatus((rows) => {
+      rows[5].posterUrl = "https://image.tmdb.org/t/p/w500/CHANGED.jpg";
+    });
+
+    const { container } = render(<Home />);
+    await act(async () => { await Promise.resolve(); });
+    const { records, stop } = watch(container);
+    await act(async () => { release(); await Promise.resolve(); await Promise.resolve(); });
+    stop();
+
+    // Exactly one attribute on one image, not a rebuilt grid.
+    expect(records).toHaveLength(1);
+    expect(records[0].type).toBe("attributes");
+    expect(records[0].attributeName).toBe("src");
+    expect(container.querySelectorAll("img[src*='CHANGED']")).toHaveLength(1);
+  });
+});
+
 describe("the skeleton is delayed, so a fast load never flashes it", () => {
   it("renders no skeleton inside the delay threshold", async () => {
     // The whole point: data now usually arrives within a frame or two, so an
