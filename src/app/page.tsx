@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ListToggle } from "@/components/ListToggle";
 import { TitleCard, type CardTitle } from "@/components/TitleCard";
+import { LaunchSplash } from "@/components/LaunchSplash";
 import type { MediaKind } from "@/lib/types";
 import { listCache, type ListState, type Status } from "@/lib/listCache";
 import { hydrateListCache, persistLists } from "@/lib/listPersist";
@@ -352,6 +353,11 @@ export default function Home() {
 
   return (
     <main className="mx-auto w-full max-w-2xl p-4 pb-24">
+      {/* Covers the launch flicker. `ready` is the active list having actually
+          loaded, so the splash clears onto real content rather than onto the
+          moment the content arrives. Rendered here (the PWA's start_url is "/")
+          and present in the server HTML, so it is in the first painted frame. */}
+      <LaunchSplash ready={loaded} />
       <Suspense fallback={null}>
         <UrlStatusSync onStatus={handleUrlStatus} />
       </Suspense>
