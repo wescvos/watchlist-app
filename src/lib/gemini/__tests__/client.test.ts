@@ -207,7 +207,8 @@ describe("generateJson 5xx retry", () => {
   it("gives up after the bounded number of attempts", async () => {
     stubFetchJson({ error: "high demand" }, { ok: false, status: 503 });
     await expect(call(noWait)).rejects.toBeInstanceOf(GeminiError);
-    // 1 initial + 2 retries, never unbounded: each attempt costs daily quota.
+    // noWait passes two delays explicitly, so this proves the bound is the
+    // delay-list length rather than something unbounded.
     expect(vi.mocked(fetch)).toHaveBeenCalledTimes(3);
   });
 
@@ -229,6 +230,34 @@ describe("generateJson 5xx retry", () => {
     expect(vi.mocked(fetch)).toHaveBeenCalledTimes(3);
   });
 
+  it("defaults to exactly one retry, so a doomed batch costs 2 requests not 3", async () => {
+    // Every attempt is billable against 20/day, and 503 "high demand" is
+    // correlated across attempts rather than independent, so extra attempts buy
+    // little and cost batches that would each have had a fresh chance.
+    stubFetchJson({ error: "high demand" }, { ok: false, status: 503 });
+    await expect(call({ retryDelaysMs: [0] })).rejects.toBeInstanceOf(GeminiError);
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(2);
+  });
+
+  it("reports every attempt through onAttempt, retries included", async () => {
+    // This is what lets a caller count REAL requests. Counting batches instead
+    // is what made the budget line lie until a 429 landed.
+    stubFetchJson({ error: "high demand" }, { ok: false, status: 503 });
+    let attempts = 0;
+    await expect(
+      call({ retryDelaysMs: [0], onAttempt: () => { attempts++; } }),
+    ).rejects.toBeInstanceOf(GeminiError);
+    expect(attempts).toBe(2);
+  });
+
+  it("counts an attempt even when the fetch itself throws", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("network down"); }));
+    let attempts = 0;
+    await expect(call({ onAttempt: () => { attempts++; } })).rejects.toBeInstanceOf(GeminiError);
+    // It reached the API and is billable whether or not a response came back.
+    expect(attempts).toBe(1);
+  });
+
   it("waits between attempts by default, so retries cannot trip the per-minute cap", async () => {
     vi.useFakeTimers();
     try {
@@ -238,15 +267,15 @@ describe("generateJson 5xx retry", () => {
       await vi.advanceTimersByTimeAsync(0);
       expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1);
 
-      // Default backoff is 15s then 30s, both at or above the 15s spacing the
-      // 5-per-minute cap requires.
+      // ONE retry by default now, at 15s: the spacing the 5-per-minute cap
+      // requires, and no more attempts than a scarce daily quota can justify.
       await vi.advanceTimersByTimeAsync(15_000);
       expect(vi.mocked(fetch)).toHaveBeenCalledTimes(2);
 
-      await vi.advanceTimersByTimeAsync(30_000);
-      expect(vi.mocked(fetch)).toHaveBeenCalledTimes(3);
-
       await expect(promise).resolves.toBe("failed");
+      // No third attempt: three attempts on a doomed batch costs two batches
+      // that would each have had a fresh chance.
+      expect(vi.mocked(fetch)).toHaveBeenCalledTimes(2);
     } finally {
       vi.useRealTimers();
     }

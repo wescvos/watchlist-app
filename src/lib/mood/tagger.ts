@@ -69,9 +69,14 @@ export interface MoodTagging {
 }
 
 export interface TagProgress {
+  /** 1-based batch number. */
   requestNumber: number;
   totalRequests: number;
   batchSize: number;
+  /** Real requests already spent this run, retries included. */
+  requestsSpent: number;
+  /** The run's ceiling, if one was set. */
+  requestBudget: number | null;
   /** The model serving this request. */
   model: string;
   /** Since tagTitles started. */
@@ -90,6 +95,15 @@ export interface TagOptions {
   retryDelaysMs?: number[];
   /** Overrides TAG_TIMEOUT_MS. */
   timeoutMs?: number;
+  /**
+   * Hard ceiling on REAL HTTP requests for this run, retries included.
+   *
+   * The run stops before exceeding it rather than discovering the limit via a
+   * 429. Retries are also clamped to what remains, so the very last request in
+   * the budget is spent on a fresh batch rather than on a retry that would
+   * overshoot.
+   */
+  requestBudget?: number;
 }
 
 // Stop a run when the model is simply down. On 2026-08-17 the alias rolled onto
@@ -100,16 +114,31 @@ export interface TagOptions {
 // intermittent failures are the case retrying is for.
 const MAX_CONSECUTIVE_BATCH_FAILURES = 3;
 
+// One retry, matching the client default. Named here so a caller can show the
+// worst-case request cost per batch (1 + this length) when planning a budget.
+export const DEFAULT_TAG_RETRY_DELAYS = [15_000];
+
+/** Why a run ended before working through every batch. */
+export type TagStopReason = "consecutive_failures" | "rate_limit" | "budget_exhausted";
+
 export interface TagResult {
   tagged: number;
   /** Titles in a batch whose request failed. Titles the model simply omitted are
    *  in neither count: they stay untagged and the next run picks them up. */
   failed: number;
+  /**
+   * REAL HTTP requests, retries included, which is what the daily quota counts.
+   *
+   * This used to count batches, so retries were invisible: a run reported "10 of
+   * 20 used" while it had actually spent all 20 and then died on a 429.
+   */
   requests: number;
+  /** Batches attempted, which is the old meaning of `requests`. */
+  batches: number;
   /** Which model actually served the requests. */
   model: string;
-  /** Set when the run stopped early because the model kept failing. */
-  abortedAfterConsecutiveFailures: boolean;
+  /** Absent when every batch was attempted. */
+  stoppedReason?: TagStopReason;
 }
 
 export const MOOD_RESPONSE_SCHEMA = {
@@ -242,7 +271,7 @@ function toBatches<T>(items: T[], size: number): T[][] {
 export async function tagTitles(ids: string[], opts: TagOptions = {}): Promise<TagResult> {
   const model = resolveModel(opts.model);
   if (ids.length === 0) {
-    return { tagged: 0, failed: 0, requests: 0, model, abortedAfterConsecutiveFailures: false };
+    return { tagged: 0, failed: 0, requests: 0, batches: 0, model };
   }
 
   const rows = await prisma.title.findMany({
@@ -255,13 +284,27 @@ export async function tagTitles(ids: string[], opts: TagOptions = {}): Promise<T
   const delayMs = opts.delayMs ?? INTER_REQUEST_DELAY_MS;
   const startedAt = Date.now();
   let lastRequestAt: number | null = null;
+  const budget = opts.requestBudget ?? null;
+  const configuredRetries = opts.retryDelaysMs ?? DEFAULT_TAG_RETRY_DELAYS;
   let tagged = 0;
   let failed = 0;
+  // Real HTTP requests, incremented by the client via onAttempt so retries count.
   let requests = 0;
+  let batchesAttempted = 0;
   let consecutiveFailures = 0;
-  let aborted = false;
+  let stoppedReason: TagStopReason | undefined;
 
   for (const rowBatch of batches) {
+    // Stop BEFORE overspending rather than learning the limit from a 429.
+    if (budget !== null && requests >= budget) {
+      console.error(
+        `[mood] stopping: request budget of ${budget} is spent (${requests} used). ` +
+          `${batches.length - batchesAttempted} batch(es) left for the next run.`,
+      );
+      stoppedReason = "budget_exhausted";
+      break;
+    }
+
     // Stay under the per-minute cap. Before each request except the first, so a
     // single-batch call (the add/refresh path) never waits.
     if (lastRequestAt !== null && delayMs > 0) await sleep(delayMs);
@@ -276,17 +319,24 @@ export async function tagTitles(ids: string[], opts: TagOptions = {}): Promise<T
       overview: r.overview,
     }));
 
-    requests++;
+    batchesAttempted++;
     const requestAt = Date.now();
     opts.onRequest?.({
-      requestNumber: requests,
+      requestNumber: batchesAttempted,
       totalRequests: batches.length,
       batchSize: batch.length,
+      requestsSpent: requests,
+      requestBudget: budget,
       model,
       elapsedMs: requestAt - startedAt,
       sinceLastMs: lastRequestAt === null ? null : requestAt - lastRequestAt,
     });
     lastRequestAt = requestAt;
+
+    // Clamp retries to what the budget can actually afford, so the last request
+    // available goes to a fresh batch rather than to a retry that overshoots.
+    const affordable = budget === null ? configuredRetries.length : Math.max(0, budget - requests - 1);
+    const retryDelaysMs = configuredRetries.slice(0, affordable);
 
     let taggings: MoodTagging[];
     try {
@@ -297,22 +347,36 @@ export async function tagTitles(ids: string[], opts: TagOptions = {}): Promise<T
         temperature: TEMPERATURE,
         expectArray: true,
         model: opts.model,
-        retryDelaysMs: opts.retryDelaysMs,
+        retryDelaysMs,
         timeoutMs: opts.timeoutMs ?? TAG_TIMEOUT_MS,
+        onAttempt: () => {
+          requests++;
+        },
       });
       taggings = parseMoodTaggings(raw, batch);
       consecutiveFailures = 0;
     } catch (e) {
-      if (e instanceof GeminiError && e.kind === "rate_limit") throw e;
-      console.error(`[mood] batch of ${batch.length} failed: ${e instanceof Error ? e.message : String(e)}`);
       failed += batch.length;
+      // A rate limit ends the run, but it must NOT throw: throwing discarded
+      // every counter, which is why a drained run once reported "Tagged 0,
+      // failed 0, using 0 request(s)" directly above DB counts proving
+      // otherwise. Stop, record why, and return what actually happened.
+      if (e instanceof GeminiError && e.kind === "rate_limit") {
+        console.error(
+          `[mood] stopping: rate limit reached on model=${model} after ${requests} request(s). ` +
+            `${batches.length - batchesAttempted} batch(es) left for the next run.`,
+        );
+        stoppedReason = "rate_limit";
+        break;
+      }
+      console.error(`[mood] batch of ${batch.length} failed: ${e instanceof Error ? e.message : String(e)}`);
       consecutiveFailures++;
       if (consecutiveFailures >= MAX_CONSECUTIVE_BATCH_FAILURES) {
         console.error(
           `[mood] stopping after ${consecutiveFailures} consecutive batch failures on model=${model}. ` +
             "The model looks unavailable; a further attempt would spend quota to learn nothing.",
         );
-        aborted = true;
+        stoppedReason = "consecutive_failures";
         break;
       }
       continue;
@@ -330,7 +394,7 @@ export async function tagTitles(ids: string[], opts: TagOptions = {}): Promise<T
     }
   }
 
-  return { tagged, failed, requests, model, abortedAfterConsecutiveFailures: aborted };
+  return { tagged, failed, requests, batches: batchesAttempted, model, stoppedReason };
 }
 
 /**

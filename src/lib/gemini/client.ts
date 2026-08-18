@@ -46,13 +46,25 @@ function endpointFor(model: string): string {
 }
 
 // A 5xx from Gemini means "busy, try again", and it says so in the body. Worth
-// retrying, unlike a 429 (retrying a rate limit is the opposite of helpful) or
+// ONE retry, unlike a 429 (retrying a rate limit is the opposite of helpful) or
 // any 4xx (a bad key or schema will fail identically forever).
 //
-// Bounded hard, because a failed request still counts against the daily quota:
-// 3 attempts total. The delays are >= the 15s that keeps a batch loop under the
-// 5-requests-per-minute cap, so retries cannot themselves trip that limit.
-const RETRY_DELAYS_MS = [15_000, 30_000];
+// ONE retry, not two, and the reasoning matters. Every attempt including a
+// failed one is billable against a 20-per-day cap, and 503 "high demand" is a
+// sustained server-load condition, so attempts are CORRELATED rather than
+// independent: a retry 15s later usually meets the same overload. On 2026-08-17
+// a 17-batch run 503'd on 16 batches, and on 2026-08-18 most batches needed 2-3
+// attempts, which silently doubled real usage and drained the day at batch 10.
+//
+// The objective is maximum titles tagged per unit of quota, not maximum batches
+// rescued. Given a resume-safe caller, a doomed batch costs nothing but the one
+// request, whereas three attempts on it cost two batches that would each have
+// had a fresh chance. One retry still catches a genuinely transient blip, which
+// does happen, without funding a lost cause.
+//
+// The delay is >= the 15s that keeps a batch loop under the 5-requests-per-minute
+// cap, so a retry cannot itself trip that limit.
+const RETRY_DELAYS_MS = [15_000];
 
 function isRetryableStatus(status: number): boolean {
   return status >= 500 && status < 600;
@@ -138,15 +150,22 @@ export interface GenerateJsonOptions {
   expectArray?: boolean;
   /** Overrides the rolling alias. See resolveModel. */
   model?: string;
-  /** Test seam only: skip the real backoff waits. */
+  /** Test seam only: skip the real backoff waits. Also caps attempts to length+1. */
   retryDelaysMs?: number[];
+  /**
+   * Called immediately before every HTTP attempt, including retries.
+   *
+   * This is how a caller counts REAL requests. Counting batches instead is what
+   * made the budget line lie: retries were invisible, so the script believed it
+   * had spent 10 of 20 when it had actually spent all 20.
+   */
+  onAttempt?: () => void;
 }
 
 /**
  * POST a prompt to Gemini in JSON mode and return the parsed response.
  *
- * Retries a 5xx up to twice with backoff, since that is Gemini saying it is
- * busy. Does NOT retry a 429 (a rate limit needs waiting out, not hammering) or
+ * Retries a 5xx ONCE with backoff, since that is Gemini saying it is busy. Does NOT retry a 429 (a rate limit needs waiting out, not hammering) or
  * any 4xx (a bad key, model id, or schema fails identically forever).
  *
  * Throws `GeminiError` for genuine failures: missing key, non-200 (429 tagged
@@ -180,6 +199,9 @@ export async function generateJson(opts: GenerateJsonOptions): Promise<unknown> 
   for (let attempt = 0; attempt <= retryDelays.length; attempt++) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+    // Before the fetch, so an attempt that throws is still counted: it reached
+    // the API and is billable either way.
+    opts.onAttempt?.();
     try {
       res = await fetch(endpoint, {
         method: "POST",

@@ -408,7 +408,7 @@ describe("tagTitles", () => {
     );
 
     expect(generateJson).toHaveBeenCalledTimes(3);
-    expect(result.abortedAfterConsecutiveFailures).toBe(true);
+    expect(result.stoppedReason).toBe("consecutive_failures");
     expect(result.tagged).toBe(0);
   });
 
@@ -430,7 +430,7 @@ describe("tagTitles", () => {
 
     // All five batches attempted: the success in the middle reset the counter.
     expect(generateJson).toHaveBeenCalledTimes(5);
-    expect(result.abortedAfterConsecutiveFailures).toBe(false);
+    expect(result.stoppedReason).toBeUndefined();
     expect(result.tagged).toBe(1);
   });
 
@@ -457,16 +457,113 @@ describe("tagTitles", () => {
     expect(opts.model).toBe("gemini-3.6-flash");
   });
 
-  it("stops immediately on a rate limit instead of burning the remaining batches", async () => {
+  it("stops on a rate limit WITHOUT throwing away its counters", async () => {
+    // Throwing here discarded tagged/failed/requests, which is why a drained run
+    // printed "Tagged 0, failed 0, using 0 request(s)" directly above DB counts
+    // proving work had happened.
     mock(prisma.title.findMany).mockResolvedValue(
       Array.from({ length: 60 }, (_, i) => row(i)),
     );
-    mock(generateJson).mockRejectedValue(new GeminiError("cap", "rate_limit"));
+    mock(generateJson)
+      .mockImplementationOnce(async (opts: { onAttempt?: () => void }) => {
+        opts.onAttempt?.();
+        return [{ index: 0, title: "Film 0", moods: ["Weird"] }];
+      })
+      .mockImplementationOnce(async (opts: { onAttempt?: () => void }) => {
+        opts.onAttempt?.();
+        throw new GeminiError("cap", "rate_limit");
+      });
 
-    await expect(tagTitles(Array.from({ length: 60 }, (_, i) => `id${i}`), { delayMs: 0 })).rejects.toMatchObject({
-      kind: "rate_limit",
+    const result = await tagTitles(Array.from({ length: 60 }, (_, i) => `id${i}`), { delayMs: 0 });
+
+    expect(result.stoppedReason).toBe("rate_limit");
+    // The work it DID do survives into the result.
+    expect(result.tagged).toBe(1);
+    expect(result.requests).toBe(2);
+    expect(result.batches).toBe(2);
+    // And it stopped rather than grinding through the third batch.
+    expect(generateJson).toHaveBeenCalledTimes(2);
+  });
+
+  it("counts REAL requests including retries, not batches", async () => {
+    // THE BUG: retries were invisible, so a run believed it had spent 10 of 20
+    // when it had actually spent all 20 and then died on a 429.
+    mock(prisma.title.findMany).mockResolvedValue(
+      Array.from({ length: 40 }, (_, i) => row(i)),
+    );
+    // Two batches; the client reports 3 attempts for the first, 1 for the second.
+    mock(generateJson)
+      .mockImplementationOnce(async (opts: { onAttempt?: () => void }) => {
+        opts.onAttempt?.();
+        opts.onAttempt?.();
+        opts.onAttempt?.();
+        return [];
+      })
+      .mockImplementationOnce(async (opts: { onAttempt?: () => void }) => {
+        opts.onAttempt?.();
+        return [];
+      });
+
+    const result = await tagTitles(Array.from({ length: 40 }, (_, i) => `id${i}`), { delayMs: 0 });
+
+    expect(result.batches).toBe(2);
+    expect(result.requests).toBe(4);
+  });
+
+  it("stops at the request budget before a 429 can happen", async () => {
+    mock(prisma.title.findMany).mockResolvedValue(
+      Array.from({ length: 200 }, (_, i) => row(i)),
+    );
+    // Faithful to the client: it makes 1 + retryDelaysMs.length attempts, so the
+    // tagger's clamp genuinely bounds spend rather than being ignored here.
+    mock(generateJson).mockImplementation(async (opts: { onAttempt?: () => void; retryDelaysMs?: number[] }) => {
+      for (let i = 0; i <= (opts.retryDelaysMs?.length ?? 0); i++) opts.onAttempt?.();
+      return [];
     });
-    expect(generateJson).toHaveBeenCalledTimes(1);
+
+    const result = await tagTitles(
+      Array.from({ length: 200 }, (_, i) => `id${i}`),
+      { delayMs: 0, requestBudget: 5 },
+    );
+
+    expect(result.stoppedReason).toBe("budget_exhausted");
+    // Exactly at the budget, never over: 2 + 2 + 1, the last batch clamped to a
+    // single attempt because only one request remained.
+    expect(result.requests).toBe(5);
+    expect(result.batches).toBe(3);
+  });
+
+  it("clamps retries to the remaining budget so the last request is not overshot", async () => {
+    mock(prisma.title.findMany).mockResolvedValue(
+      Array.from({ length: 40 }, (_, i) => row(i)),
+    );
+    const seen: number[] = [];
+    mock(generateJson).mockImplementation(async (opts: { onAttempt?: () => void; retryDelaysMs?: number[] }) => {
+      seen.push(opts.retryDelaysMs?.length ?? -1);
+      opts.onAttempt?.();
+      return [];
+    });
+
+    // Budget of 2: the first batch may retry once (1 spent, 1 left), the second
+    // gets no retry allowance at all.
+    await tagTitles(Array.from({ length: 40 }, (_, i) => `id${i}`), { delayMs: 0, requestBudget: 2 });
+
+    expect(seen).toEqual([1, 0]);
+  });
+
+  it("defaults to a single retry on the quota-limited tier", async () => {
+    // Three attempts per batch spends scarce quota on a doomed batch, and 503s
+    // are correlated across attempts rather than independent.
+    mock(prisma.title.findMany).mockResolvedValue([row(0, { title: "Parasite" })]);
+    mock(generateJson).mockImplementation(async (opts: { onAttempt?: () => void }) => {
+      opts.onAttempt?.();
+      return [{ index: 0, title: "Parasite", moods: ["Weird"] }];
+    });
+
+    await tagTitles(["id0"], { delayMs: 0 });
+
+    const opts = mock(generateJson).mock.calls[0][0] as { retryDelaysMs?: number[] };
+    expect(opts.retryDelaysMs).toHaveLength(1);
   });
 
   it("paces requests to stay under the 5-per-minute cap", async () => {
@@ -508,7 +605,7 @@ describe("tagTitles", () => {
       const promise = tagTitles(["id0"]);
       await vi.advanceTimersByTimeAsync(0);
 
-      await expect(promise).resolves.toMatchObject({ tagged: 1, requests: 1 });
+      await expect(promise).resolves.toMatchObject({ tagged: 1, batches: 1 });
     } finally {
       vi.useRealTimers();
     }
