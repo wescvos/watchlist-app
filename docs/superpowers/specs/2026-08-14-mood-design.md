@@ -154,6 +154,7 @@ Show.
 - A well-crafted character drama.
 - A twisty thriller whose twist is a plot reveal rather than the premise itself.
 - A film that is merely intelligent, or merely slow.
+- **A formally ambitious biography or historical drama, on the strength of its form.** Dual timelines, non-linear editing and a bold visual scheme are **execution**, not premise. *Oppenheimer* described as "the making of the atomic bomb and its aftermath" still makes complete sense, so its premise is not load-bearing. Added after the Flash Lite probe (2026-08-19) tagged it Conceptual. Note the deliberate contrast that keeps this from over-correcting: *Memento* is also non-linear, but its premise (a man who cannot form new memories) **is** the architecture and cannot be removed, so Memento **is** Conceptual. Judge the premise, not the technique.
 
 Being clever or serious does not qualify a film. The premise has to be
 load-bearing: remove it and the film has no shape left.

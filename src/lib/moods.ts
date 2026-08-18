@@ -115,7 +115,12 @@ export const MOODS: readonly Mood[] = [
       "The Double, Groundhog Day, Eternal Sunshine, The Prestige, Being John Malkovich, Source Code, The Truman Show. " +
       "Do NOT tag Conceptual for: a well-crafted character drama; a twisty thriller whose twist is a plot reveal rather " +
       "than the premise itself; a film that is merely intelligent or merely slow. Being clever or serious does not qualify " +
-      "a film; the premise has to be load-bearing, so that removing it leaves the film with no shape.",
+      "a film; the premise has to be load-bearing, so that removing it leaves the film with no shape. " +
+      "ALSO do NOT tag a formally ambitious biography or historical drama on the strength of its FORM. Dual timelines, " +
+      "non-linear editing and a bold visual scheme are EXECUTION, not premise. Oppenheimer described as \"the making of " +
+      "the atomic bomb and its aftermath\" still makes complete sense, so its premise is not load-bearing and it is NOT " +
+      "Conceptual. Note the contrast: Memento is also non-linear, but its premise (a man who cannot form new memories) " +
+      "IS the architecture and cannot be removed, so Memento IS Conceptual. Judge the premise, not the technique.",
   },
 ] as const;
 

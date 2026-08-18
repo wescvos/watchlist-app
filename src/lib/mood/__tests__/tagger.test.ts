@@ -127,6 +127,19 @@ describe("buildTagPrompt", () => {
     expect(prompt).not.toContain("Tense & gripping");
   });
 
+  it("rules out formally ambitious biography, without excluding Memento", () => {
+    // The Lite probe gave Conceptual to Oppenheimer: structurally inventive, but
+    // its premise is not load-bearing. The counter-example has to exclude that
+    // WITHOUT excluding a genuinely conceptual non-linear film.
+    const prompt = buildTagPrompt(batch);
+    expect(prompt).toContain("EXECUTION, not premise");
+    expect(prompt).toContain("Oppenheimer");
+    expect(prompt).toContain("it is NOT");
+    // The guard against over-correcting: Memento is non-linear AND conceptual.
+    expect(prompt).toContain("Memento IS Conceptual");
+    expect(prompt).toContain("Judge the premise, not the technique");
+  });
+
   it("separates Slow-burn dread from Scary, which is horror mechanics", () => {
     const prompt = buildTagPrompt(batch);
     expect(prompt).toContain("MADE TO FRIGHTEN");
