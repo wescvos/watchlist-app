@@ -58,4 +58,21 @@ describe("handleProxy", () => {
     expect(res.status).toBe(200);
     expect(res.cookies.get("wl_uid")).toBeUndefined();
   });
+
+  it("does not treat lookalike paths as public", async () => {
+    for (const p of ["/signinX", "/signin/x"]) {
+      expect(handleProxy(req(p, null)).status).toBe(307);
+    }
+    for (const p of ["/api/authfoo", "/api/auth"]) {
+      expect(handleProxy(req(p, null)).status).toBe(401);
+    }
+  });
+
+  it("sets wl_uid with the expected attributes", () => {
+    const c = handleProxy(req("/", ok)).cookies.get("wl_uid")!;
+    expect(c.httpOnly).toBeFalsy();
+    expect(c.sameSite).toBe("lax");
+    expect(c.path).toBe("/");
+    expect(c.maxAge).toBe(60 * 60 * 24 * 365);
+  });
 });

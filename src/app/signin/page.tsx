@@ -15,6 +15,8 @@ export default async function SignInPage({
   return (
     <main className="min-h-screen flex items-center justify-center p-6">
       <form action={google} className="w-full max-w-xs space-y-4">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/icons/icon-192.png" alt="" width={64} height={64} className="mx-auto rounded-2xl" />
         <p className="text-center meta">Private library</p>
         <h1 className="text-xl font-semibold text-center">Watchlist</h1>
         {error === "AccessDenied" && (
