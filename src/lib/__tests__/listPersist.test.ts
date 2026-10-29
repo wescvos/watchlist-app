@@ -6,10 +6,11 @@ import {
   readPersistedLists,
   hydrateListCache,
   clearPersistedLists,
+  clearAllPersistedLists,
   projectCard,
 } from "@/lib/listPersist";
 
-const KEY = "watchlist:lists";
+const KEY = "watchlist:lists:u1";
 
 function card(i: number, overrides: Partial<CardTitle> = {}): CardTitle {
   return {
@@ -34,13 +35,19 @@ function stored(payload: unknown) {
   window.localStorage.setItem(KEY, JSON.stringify(payload));
 }
 
+function setUid(uid: string | null) {
+  document.cookie = uid ? `wl_uid=${uid}; path=/` : "wl_uid=; path=/; max-age=0";
+}
+
 beforeEach(() => {
   window.localStorage.clear();
+  setUid("u1");
   listCache.WANT = emptyListState;
   listCache.WATCHED = emptyListState;
 });
 
 afterEach(() => {
+  setUid(null);
   vi.restoreAllMocks();
 });
 
@@ -329,5 +336,62 @@ describe("payload size", () => {
 
     const bytes = window.localStorage.getItem(KEY)!.length;
     expect(bytes).toBeLessThan(1024 * 1024);
+  });
+});
+
+describe("per-user namespacing", () => {
+  it("never serves one user's cache to another on the same device", () => {
+    setUid("a");
+    persistLists({ WANT: loaded([card(1)]), WATCHED: loaded([card(2)]) });
+    expect(window.localStorage.getItem("watchlist:lists:a")).not.toBeNull();
+
+    setUid("b");
+    expect(readPersistedLists()).toBeNull();
+    expect(hydrateListCache()).toBe(false);
+    expect(listCache.WANT.loaded).toBe(false);
+
+    setUid("a");
+    expect(readPersistedLists()?.WANT).toHaveLength(1);
+  });
+
+  it("writes nothing and reads null when there is no user cookie", () => {
+    setUid(null);
+    persistLists({ WANT: loaded([card(1)]), WATCHED: loaded([card(2)]) });
+    expect(window.localStorage.length).toBe(0);
+    expect(readPersistedLists()).toBeNull();
+    expect(hydrateListCache()).toBe(false);
+  });
+
+  it("clearPersistedLists only clears the current user's key", () => {
+    setUid("a");
+    persistLists({ WANT: loaded([card(1)]), WATCHED: emptyListState });
+    setUid("b");
+    persistLists({ WANT: loaded([card(2)]), WATCHED: emptyListState });
+    clearPersistedLists();
+    expect(window.localStorage.getItem("watchlist:lists:b")).toBeNull();
+    expect(window.localStorage.getItem("watchlist:lists:a")).not.toBeNull();
+  });
+});
+
+describe("clearAllPersistedLists", () => {
+  it("removes every list key including the legacy one, and nothing else", () => {
+    window.localStorage.setItem("watchlist:lists", "legacy");
+    window.localStorage.setItem("watchlist:lists:a", "a");
+    window.localStorage.setItem("watchlist:lists:b", "b");
+    window.localStorage.setItem("unrelated", "keep");
+
+    clearAllPersistedLists();
+
+    expect(window.localStorage.getItem("watchlist:lists")).toBeNull();
+    expect(window.localStorage.getItem("watchlist:lists:a")).toBeNull();
+    expect(window.localStorage.getItem("watchlist:lists:b")).toBeNull();
+    expect(window.localStorage.getItem("unrelated")).toBe("keep");
+  });
+
+  it("does not throw when storage is denied", () => {
+    vi.spyOn(window.localStorage, "key").mockImplementation(() => {
+      throw new DOMException("SecurityError", "SecurityError");
+    });
+    expect(() => clearAllPersistedLists()).not.toThrow();
   });
 });

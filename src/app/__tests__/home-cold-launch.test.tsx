@@ -13,6 +13,12 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(),
 }));
 
+// Home renders AccountMenu, which needs a session provider in real use.
+vi.mock("next-auth/react", () => ({
+  useSession: () => ({ data: null, status: "loading" }),
+  signOut: vi.fn(),
+}));
+
 import Home from "@/app/page";
 
 function card(i: number, overrides: Partial<CardTitle> = {}): CardTitle {
@@ -61,12 +67,14 @@ async function advancePastDelay() {
 beforeEach(() => {
   vi.clearAllMocks();
   window.localStorage.clear();
+  document.cookie = "wl_uid=u1; path=/";
   // A genuinely cold launch: nothing in memory either.
   listCache.WANT = emptyListState;
   listCache.WATCHED = emptyListState;
 });
 
 afterEach(() => {
+  document.cookie = "wl_uid=; path=/; max-age=0";
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
@@ -234,7 +242,7 @@ describe("the skeleton is delayed, so a fast load never flashes it", () => {
   });
 
   it("still shows the skeleton after the threshold when the stored payload is corrupt", async () => {
-    window.localStorage.setItem("watchlist:lists", "{not json");
+    window.localStorage.setItem("watchlist:lists:u1", "{not json");
     stubPendingFetch();
 
     const { container } = render(<Home />);
@@ -245,7 +253,7 @@ describe("the skeleton is delayed, so a fast load never flashes it", () => {
 
   it("still shows the skeleton after the threshold when the stored payload is an empty library", async () => {
     window.localStorage.setItem(
-      "watchlist:lists",
+      "watchlist:lists:u1",
       JSON.stringify({ v: 1, lists: { WANT: [], WATCHED: [] } }),
     );
     stubPendingFetch();

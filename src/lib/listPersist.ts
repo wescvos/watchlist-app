@@ -1,4 +1,5 @@
 import type { CardTitle } from "@/components/TitleCard";
+import { readClientUserId } from "@/lib/clientUser";
 import { listCache, type ListState, type Status } from "@/lib/listCache";
 
 /**
@@ -15,7 +16,16 @@ import { listCache, type ListState, type Status } from "@/lib/listCache";
  * paint, never an answer.
  */
 
-const STORAGE_KEY = "watchlist:lists";
+const KEY_PREFIX = "watchlist:lists";
+
+// One key PER USER. The device can be shared, and a cached list is private
+// data, so user B must never paint user A's posters on a cold launch. With no
+// known user (no cookie) there is no safe key, so every operation is a no-op and
+// the read is a miss.
+function storageKey(): string | null {
+  const uid = readClientUserId();
+  return uid ? `${KEY_PREFIX}:${uid}` : null;
+}
 
 // Bump to deliberately invalidate every stored payload. Note that a change to
 // the persisted field set invalidates old data automatically as well: the reader
@@ -90,10 +100,12 @@ function parseList(value: unknown): CardTitle[] | null {
 /** Raw read with no usefulness judgement, used by the writer to preserve the other list. */
 function readRaw(): PersistedLists | null {
   if (typeof window === "undefined") return null;
+  const key = storageKey();
+  if (!key) return null;
 
   let raw: string | null;
   try {
-    raw = window.localStorage.getItem(STORAGE_KEY);
+    raw = window.localStorage.getItem(key);
   } catch {
     // Safari private mode throws on access, not just on write.
     return null;
@@ -152,6 +164,8 @@ export function readPersistedLists(): PersistedLists | null {
  */
 export function persistLists(lists: Record<Status, ListState>): void {
   if (typeof window === "undefined") return;
+  const key = storageKey();
+  if (!key) return;
 
   const existing = readRaw();
   const usable = (state: ListState, previous: CardTitle[] | null) =>
@@ -168,12 +182,12 @@ export function persistLists(lists: Record<Status, ListState>): void {
   if (payload.lists.WANT === null && payload.lists.WATCHED === null) return;
 
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+    window.localStorage.setItem(key, JSON.stringify(payload));
   } catch {
     // Out of quota, or storage denied. Drop the key so a stale payload cannot
     // outlive the data it was meant to mirror.
     try {
-      window.localStorage.removeItem(STORAGE_KEY);
+      window.localStorage.removeItem(key);
     } catch {
       // Nothing further to do; the cache is simply unavailable.
     }
@@ -182,10 +196,32 @@ export function persistLists(lists: Record<Status, ListState>): void {
 
 export function clearPersistedLists(): void {
   if (typeof window === "undefined") return;
+  const key = storageKey();
+  if (!key) return;
   try {
-    window.localStorage.removeItem(STORAGE_KEY);
+    window.localStorage.removeItem(key);
   } catch {
     // Ignored: an unwritable store is also an unclearable one.
+  }
+}
+
+/**
+ * Remove every persisted list on this device, for every user, including the
+ * legacy unscoped key from before lists were per-user. Used on sign-out so
+ * nothing private outlives the session.
+ */
+export function clearAllPersistedLists(): void {
+  if (typeof window === "undefined") return;
+  try {
+    const doomed: string[] = [];
+    for (let i = 0; i < window.localStorage.length; i++) {
+      const key = window.localStorage.key(i);
+      if (key && key.startsWith(KEY_PREFIX)) doomed.push(key);
+    }
+    // Collected first: removing while indexing would skip entries.
+    for (const key of doomed) window.localStorage.removeItem(key);
+  } catch {
+    // Ignored: an unreadable store is also an unclearable one.
   }
 }
 
