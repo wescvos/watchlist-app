@@ -7,5 +7,4 @@ export function getEnv(name: string): string {
 export const env = {
   get tmdbKey() { return getEnv("TMDB_API_KEY"); },
   get omdbKey() { return getEnv("OMDB_API_KEY"); },
-  get passcode() { return getEnv("APP_PASSCODE"); },
 };
