@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { prisma } from "@/lib/prisma";
+import { requireUserId } from "@/lib/currentUser";
 import { BackLink } from "@/components/BackLink";
 import { MOODS } from "@/lib/moods";
 
@@ -107,16 +108,18 @@ export default async function MoodPage() {
   // needs too. Counting twelve moods and choosing twelve posters with per-mood
   // queries would be two dozen round trips for something a 300-row array does
   // in memory.
-  const titles: PickerTitle[] = await prisma.title.findMany({
-    where: { status: "WANT" },
+  const userId = await requireUserId();
+  const entries = await prisma.listEntry.findMany({
+    where: { userId, status: "WANT" },
     select: {
-      moods: true,
-      moodsTaggedAt: true,
-      posterUrl: true,
-      imdbScore: true,
       addedAt: true,
+      title: {
+        select: { moods: true, moodsTaggedAt: true, posterUrl: true, imdbScore: true },
+      },
     },
   });
+  // Flatten into the picker's shape so everything below is unchanged.
+  const titles: PickerTitle[] = entries.map((e) => ({ ...e.title, addedAt: e.addedAt }));
 
   const counts = new Map<string, number>();
   for (const t of titles) {

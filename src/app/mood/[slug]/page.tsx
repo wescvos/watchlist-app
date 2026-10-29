@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
+import { requireUserId } from "@/lib/currentUser";
 import { BackLink } from "@/components/BackLink";
 import { TitleCard } from "@/components/TitleCard";
 import { moodBySlug } from "@/lib/moods";
@@ -14,26 +15,33 @@ export default async function MoodTitlesPage({ params }: { params: Promise<{ slu
   const mood = moodBySlug(slug);
   if (!mood) notFound();
 
-  const titles = await prisma.title.findMany({
+  const userId = await requireUserId();
+  const entries = await prisma.listEntry.findMany({
     // `has` on a Postgres TEXT[] column. No index needed at this size, and
     // genres is not indexed either; a GIN index is one line if the library ever
     // grows by an order of magnitude.
-    where: { status: "WANT", moods: { has: mood.label } },
+    where: { userId, status: "WANT", title: { moods: { has: mood.label } } },
     // Deliberately the same ordering as listTitles()'s Want branch, so a
     // title's position here feels consistent with Home.
     orderBy: [{ pinned: "desc" }, { pinnedAt: "desc" }, { addedAt: "desc" }],
     select: {
-      id: true,
-      title: true,
-      year: true,
-      posterUrl: true,
       myRating: true,
-      imdbScore: true,
-      genres: true,
-      mediaType: true,
       pinned: true,
+      title: {
+        select: {
+          id: true,
+          title: true,
+          year: true,
+          posterUrl: true,
+          imdbScore: true,
+          genres: true,
+          mediaType: true,
+        },
+      },
     },
   });
+  // Flatten into the card's shape; `id` is the Title id, as on Home.
+  const titles = entries.map((e) => ({ ...e.title, myRating: e.myRating, pinned: e.pinned }));
 
   return (
     <main className="mx-auto w-full max-w-2xl p-4 pb-24">
