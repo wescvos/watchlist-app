@@ -26,12 +26,12 @@ export function AccountMenu() {
   }
 
   return (
-    <div className="flex items-center gap-1">
-      {label && <span className="max-w-24 truncate text-sm text-gray-500">{label}</span>}
+    <div className="flex shrink-0 items-center gap-1">
+      {label && <span className="hidden max-w-24 truncate text-sm text-gray-500 sm:inline">{label}</span>}
       <button
         type="button"
         onClick={handleSignOut}
-        className="rounded-lg px-2 py-2 text-sm font-medium text-gray-500 transition-colors hover:bg-gray-100 hover:text-foreground active:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground dark:hover:bg-white/10 dark:active:bg-white/10"
+        className="shrink-0 whitespace-nowrap rounded-lg px-2 py-2 text-sm font-medium text-gray-500 transition-colors hover:bg-gray-100 hover:text-foreground active:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground dark:hover:bg-white/10 dark:active:bg-white/10"
       >
         Sign out
       </button>
