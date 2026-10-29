@@ -1,5 +1,5 @@
 /**
- * Clears mood tags from every "Want to watch" title, so the next backfill
+ * Clears mood tags from every title on any user's "Want to watch" list, so the next backfill
  * re-tags the whole list from scratch.
  *
  * WHY THIS EXISTS. Changing the mood vocabulary invalidates the stored tags,
@@ -17,8 +17,9 @@
  * But an honest intermediate state beats a merely safe one.)
  *
  * DESTRUCTIVE, and requires --confirm. It only touches the two mood columns:
- * status, ratings, notes, pinned state, and watch dates are never in the update
- * payload, so user data is untouched by construction rather than by convention.
+ * ListEntry rows (status, ratings, notes, pinned state, watch dates) are never in
+ * the update payload, so user data is untouched by construction rather than by
+ * convention. Moods live on the shared Title, so this affects every user.
  *
  * Run manually, then run the backfill:
  *   npx tsx scripts/clear-want-moods.ts             # refuses, shows what it would do
@@ -42,9 +43,12 @@ async function main() {
   const { prisma } = await import("../src/lib/prisma");
   const { MOOD_LABELS } = await import("../src/lib/moods");
 
-  const total = await prisma.title.count({ where: { status: "WANT" } });
+  // "On a Want list" lives on ListEntry now, so it is a relation filter.
+  const onWantList = { entries: { some: { status: "WANT" as const } } };
+
+  const total = await prisma.title.count({ where: onWantList });
   const tagged = await prisma.title.count({
-    where: { status: "WANT", moodsTaggedAt: { not: null } },
+    where: { ...onWantList, moodsTaggedAt: { not: null } },
   });
 
   console.log(`Current mood vocabulary (${MOOD_LABELS.length}): ${MOOD_LABELS.join(", ")}`);
@@ -57,13 +61,13 @@ async function main() {
   }
 
   const result = await prisma.title.updateMany({
-    where: { status: "WANT" },
+    where: onWantList,
     // Only these two fields. Nothing else is in the payload.
     data: { moods: [], moodsTaggedAt: null },
   });
 
   const stillTagged = await prisma.title.count({
-    where: { status: "WANT", moodsTaggedAt: { not: null } },
+    where: { ...onWantList, moodsTaggedAt: { not: null } },
   });
 
   console.log(`\nCleared ${result.count} Want titles. Still tagged: ${stillTagged} (expected 0).`);

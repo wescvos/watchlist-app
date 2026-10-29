@@ -5,8 +5,9 @@
  *
  * Reuses refreshTitle() as-is — no fetch/merge/persist logic duplicated here.
  * refreshTitle() only ever writes cached metadata (toData()'s fields); it
- * never includes status/note/myRating/addedAt/watchedAt in its update
- * payload, so user data is untouched by construction, not by convention.
+ * never touches ListEntry (status/note/myRating/addedAt/watchedAt live there
+ * per user), so user data is untouched by construction, not by convention.
+ * Titles are a shared catalog: this refreshes every title on any user's Want list.
  *
  * Not wired into the app. Run manually:
  *   npx tsx scripts/refresh-all-titles.ts
@@ -41,9 +42,9 @@ async function main() {
   const { refreshTitle } = await import("../src/lib/titles");
 
   const titles = await prisma.title.findMany({
-    where: { status: "WANT" },
+    where: { entries: { some: { status: "WANT" } } },
     select: { id: true, title: true },
-    orderBy: { addedAt: "asc" },
+    orderBy: { fetchedAt: "asc" },
   });
 
   console.log(`Refreshing ${titles.length} "Want to watch" titles...\n`);

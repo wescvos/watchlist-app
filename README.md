@@ -43,16 +43,26 @@ Search any movie or series, add it to either list, and the app pulls in the cast
 
 ## Environment variables
 
-Copy `.env.example` to `.env.local` and fill in the four values:
+Copy `.env.example` to `.env.local` and fill in the values:
 
 ```
-DATABASE_URL=      # your Postgres connection string (see gotcha below)
+DATABASE_URL=       # your Postgres connection string (see gotcha below)
 TMDB_API_KEY=       # from the TMDb steps above
 OMDB_API_KEY=       # from the OMDb steps above
-APP_PASSCODE=       # any passcode you choose — gates access to your instance
+AUTH_SECRET=        # random string that signs sessions, e.g. `npx auth secret`
+AUTH_GOOGLE_ID=     # Google OAuth client ID
+AUTH_GOOGLE_SECRET= # Google OAuth client secret
+ALLOWED_EMAILS=     # comma separated emails allowed to sign in
 ```
 
-`APP_PASSCODE` isn't tied to any external service — it's just a single shared passcode you make up, used to lock the app behind a simple gate.
+Sign-in is Google only. Create an OAuth client (Web application) in the Google Cloud console and add `http://localhost:3000/api/auth/callback/google` (and your deployed URL's equivalent) as an authorized redirect URI. Only addresses listed in `ALLOWED_EMAILS` can sign in; matching is case-insensitive.
+
+## Adding a friend
+
+1. In Vercel, open the project's Environment Variables and add their email to `ALLOWED_EMAILS` (comma separated, e.g. `you@example.com,friend@example.com`).
+2. Redeploy so the new value takes effect.
+
+Each person gets their own list over a shared title catalog. To remove someone, delete their email from `ALLOWED_EMAILS` and redeploy: they are signed out and cannot sign back in.
 
 ## Local setup
 
@@ -74,7 +84,7 @@ Your database starts **empty**. This is a fresh, clean instance — there's no s
 ## Deploy to Vercel
 
 1. Import the repo into Vercel.
-2. Set all four environment variables (`DATABASE_URL`, `TMDB_API_KEY`, `OMDB_API_KEY`, `APP_PASSCODE`) for the Production environment — per the gotchas above.
+2. Set all the environment variables above (`DATABASE_URL`, `TMDB_API_KEY`, `OMDB_API_KEY`, `AUTH_SECRET`, `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`, `ALLOWED_EMAILS`) for the Production environment, per the gotchas above.
 3. Deploy. The build script (`prisma generate && prisma migrate deploy && next build`) applies any pending migrations automatically on every deploy — no manual migration step needed.
 
 ## Install as an app (iOS / Android)
@@ -99,14 +109,14 @@ Already have a list in Google's "Want to watch"? You can bring it across.
 
 1. Export your data via [Google Takeout](https://takeout.google.com) — include **Saved** (your want-to-watch lists) and **Search Contributions** (your watched history).
 2. Drop the exported files into an `import/` folder at the project root (this folder is gitignored, so your personal data never gets committed).
-3. Run the import in preview mode first to see what will match:
+3. Sign in to the app once with your Google account so your user exists, then run the import in preview mode first to see what will match. `--email` is required and names the user whose list receives the titles:
 ```bash
-   npx tsx scripts/import-google-takeout.ts
+   npx tsx scripts/import-google-takeout.ts --email you@example.com
 ```
    This is a **dry run** by default — it reports which titles matched confidently against TMDb and which need review, and writes nothing to your database.
 4. When you're happy with the preview, run it again with `--commit` to actually import:
 ```bash
-   npx tsx scripts/import-google-takeout.ts --commit
+   npx tsx scripts/import-google-takeout.ts --email you@example.com --commit
 ```
 
 Titles from your watched history import as **Watched**; titles from your saved lists import as **Want to watch**. Anything that can't be matched confidently is skipped rather than guessed.

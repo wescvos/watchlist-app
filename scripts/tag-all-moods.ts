@@ -1,6 +1,7 @@
 /**
  * One-off backfill: mood-tags every title that has never been tagged, so the
- * Mood screen has something to show. Reuses tagTitles() as-is, so batching,
+ * Mood screen has something to show. Titles are a shared catalog, so "Want" here
+ * means "on ANY user's Want list" and moods are tagged once for everybody. Reuses tagTitles() as-is, so batching,
  * the privacy whitelist, the alignment guard, and the validation rules are the
  * same ones the app uses at add/refresh time. Nothing is duplicated here.
  *
@@ -112,16 +113,26 @@ async function main() {
   const { resolveModel, GEMINI_MODEL } = await import("../src/lib/gemini/client");
   const servingModel = resolveModel(model);
 
-  const where = all
-    ? { moodsTaggedAt: null }
-    : { moodsTaggedAt: null, status: "WANT" as const };
+  // "On a Want list" now lives on ListEntry, so it is a relation filter.
+  const onWantList = { entries: { some: { status: "WANT" as const } } };
+  const notOnWantList = { entries: { none: { status: "WANT" as const } } };
+  const where = all ? { moodsTaggedAt: null } : { moodsTaggedAt: null, ...onWantList };
 
-  const untagged = await prisma.title.findMany({
-    where,
+  // Want first, then (with --all) everything else, oldest-fetched first within
+  // each. Two queries rather than ordering by status, which no longer lives on Title.
+  const wantFirst = await prisma.title.findMany({
+    where: { moodsTaggedAt: null, ...onWantList },
     select: { id: true, title: true },
-    // Want before Watched (WANT sorts first), oldest first within each.
-    orderBy: [{ status: "asc" }, { addedAt: "asc" }],
+    orderBy: { fetchedAt: "asc" },
   });
+  const rest = all
+    ? await prisma.title.findMany({
+        where: { moodsTaggedAt: null, ...notOnWantList },
+        select: { id: true, title: true },
+        orderBy: { fetchedAt: "asc" },
+      })
+    : [];
+  const untagged = [...wantFirst, ...rest];
 
   const scope = all ? "Want and Watched" : "Want to watch";
   if (untagged.length === 0) {
@@ -164,8 +175,8 @@ async function main() {
     console.log(`(--limit ${limit}: leaving ${untagged.length - targets.length} for a later run.)`);
   }
   if (!all) {
-    const watched = await prisma.title.count({ where: { moodsTaggedAt: null, status: "WATCHED" } });
-    if (watched > 0) console.log(`(Skipping ${watched} untagged Watched titles. Pass --all on a free-budget day.)`);
+    const watched = await prisma.title.count({ where: { moodsTaggedAt: null, ...notOnWantList } });
+    if (watched > 0) console.log(`(Skipping ${watched} untagged titles that are on no Want list. Pass --all on a free-budget day.)`);
   }
   if (dryRun) {
     console.log("\nDRY RUN. Nothing sent to Gemini, no quota spent, no rows written.");
@@ -209,12 +220,12 @@ async function main() {
   // are neither tagged nor failed, and only the database knows the truth.
   const remaining = await prisma.title.count({ where });
   const withMoods = await prisma.title.count({
-    where: all ? { moods: { isEmpty: false } } : { status: "WANT", moods: { isEmpty: false } },
+    where: all ? { moods: { isEmpty: false } } : { ...onWantList, moods: { isEmpty: false } },
   });
   const noMoodMatched = await prisma.title.count({
     where: all
       ? { moodsTaggedAt: { not: null }, moods: { isEmpty: true } }
-      : { status: "WANT", moodsTaggedAt: { not: null }, moods: { isEmpty: true } },
+      : { ...onWantList, moodsTaggedAt: { not: null }, moods: { isEmpty: true } },
   });
 
   console.log("\n" + "=".repeat(60));

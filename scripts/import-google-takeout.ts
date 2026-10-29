@@ -4,9 +4,12 @@
  * against TMDb, and reports what would be imported. Nothing is written to
  * the database unless run with --commit.
  *
+ * Titles are imported into one user's list, so --email is required: the user
+ * must already exist (sign in once with that Google account first).
+ *
  * Usage:
- *   npx tsx scripts/import-google-takeout.ts             # dry run (default)
- *   npx tsx scripts/import-google-takeout.ts --commit     # actually import
+ *   npx tsx scripts/import-google-takeout.ts --email you@example.com            # dry run (default)
+ *   npx tsx scripts/import-google-takeout.ts --email you@example.com --commit   # actually import
  */
 import { config } from "dotenv";
 import { fileURLToPath } from "node:url";
@@ -29,6 +32,16 @@ import { normalize, evaluateMatch, type MatchOutcome } from "../src/lib/tmdbMatc
 
 const COMMIT = process.argv.includes("--commit");
 const SEARCH_DELAY_MS = 300;
+
+function readEmail(): string {
+  const flag = process.argv.indexOf("--email");
+  const value = flag >= 0 ? process.argv[flag + 1] : undefined;
+  if (!value || value.startsWith("--")) {
+    console.error("--email <address> is required: the user whose list receives the import.");
+    process.exit(1);
+  }
+  return value.trim().toLowerCase();
+}
 
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -141,6 +154,14 @@ async function main() {
   const { addTitle } = await import("../src/lib/titles");
   const { Status } = await import("@prisma/client");
 
+  const email = readEmail();
+  const user = await prisma.user.findUnique({ where: { email }, select: { id: true } });
+  if (!user) {
+    console.error(`No user with email ${email}. Sign in once with that Google account first.`);
+    process.exit(1);
+  }
+  const userId = user.id;
+
   const watched = readWatchedJson();
   const want = readWantCsvs();
   const watchedKeys = new Set(watched.map((w) => normalize(w.title)));
@@ -183,7 +204,7 @@ async function main() {
   }
 
   // Dedupe by resolved TMDb target (different input titles can resolve to the
-  // same title) and check what's already in the library. Shared seenTargets
+  // same title) and check what's already in this user's list. Shared seenTargets
   // set spans both tiers so a title resolved confidently elsewhere doesn't
   // also get queued from the tiebreak tier.
   const seenTargets = new Set<string>();
@@ -199,9 +220,11 @@ async function main() {
         continue;
       }
       seenTargets.add(key);
-      const existing = await prisma.title.findUnique({
-        where: { tmdbId_mediaType: { tmdbId: item.candidate.tmdbId, mediaType: item.candidate.mediaType } },
-        select: { id: true },
+      // A title only counts as "already there" if THIS user has an entry for it;
+      // the shared catalog row alone says nothing about their list.
+      const existing = await prisma.listEntry.findFirst({
+        where: { userId, title: { tmdbId: item.candidate.tmdbId, mediaType: item.candidate.mediaType } },
+        select: { titleId: true },
       });
       if (existing) {
         alreadyInLibrary++;
@@ -263,9 +286,12 @@ async function main() {
   let imported = 0;
   for (const item of [...toImportConfirmed, ...toImportTiebreak]) {
     const status = item.source === "watched" ? Status.WATCHED : Status.WANT;
-    const created = await addTitle(item.candidate.tmdbId, item.candidate.mediaType, status);
+    const created = await addTitle(userId, item.candidate.tmdbId, item.candidate.mediaType, status);
     if (item.source === "watched" && item.watchedAt) {
-      await prisma.title.update({ where: { id: created.id }, data: { watchedAt: item.watchedAt } });
+      await prisma.listEntry.update({
+        where: { userId_titleId: { userId, titleId: created.id } },
+        data: { watchedAt: item.watchedAt },
+      });
     }
     imported++;
     await sleep(SEARCH_DELAY_MS);

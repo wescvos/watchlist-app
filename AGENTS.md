@@ -24,6 +24,11 @@ This version has breaking changes — APIs, conventions, and file structure may 
 - Never `git add -A`. Stage specific files by path.
 - `tasks/` is scratch history and stays untracked.
 
+## Auth
+
+- Authorization is per route and per page: call `getCurrentUserId`/`requireUserId` and scope every query by that user. The proxy is only an optimistic redirect check, never the gate.
+- Never trust a title id from the client. A title is reachable only through the signed-in user's own `ListEntry`; no entry means 404, never 403. New code never deletes `Title` rows.
+
 ## Database
 
 - Generate migrations with `prisma migrate diff ... --script` (read-only). NEVER `migrate dev`, not even `--create-only`: it applies already-pending migrations to the connected DB as a side effect.
