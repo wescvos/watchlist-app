@@ -40,11 +40,11 @@ ALTER TABLE "ListEntry" ADD CONSTRAINT "ListEntry_userId_fkey" FOREIGN KEY ("use
 -- AddForeignKey
 ALTER TABLE "ListEntry" ADD CONSTRAINT "ListEntry_titleId_fkey" FOREIGN KEY ("titleId") REFERENCES "Title"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
-
-
 -- Backfill: the whole existing list belongs to the owner account.
+-- Skipped on an empty database so a fresh install does not get the owner row.
 INSERT INTO "User" ("id", "email", "createdAt")
-VALUES (gen_random_uuid()::text, 'wesley@vosk.co.za', now());
+SELECT gen_random_uuid()::text, 'wesley@vosk.co.za', now()
+WHERE EXISTS (SELECT 1 FROM "Title");
 
 INSERT INTO "ListEntry" ("id", "userId", "titleId", "status", "note", "myRating", "pinned", "pinnedAt", "addedAt", "watchedAt")
 SELECT gen_random_uuid()::text, u."id", t."id", t."status", t."note", t."myRating", t."pinned", t."pinnedAt", t."addedAt", t."watchedAt"

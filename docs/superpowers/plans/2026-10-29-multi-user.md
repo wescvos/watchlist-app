@@ -252,8 +252,9 @@ WHERE u."email" = 'wesley@vosk.co.za';
   5. In Vercel, Project, Settings, Environment Variables (Production), add `AUTH_GOOGLE_ID`, `AUTH_GOOGLE_SECRET`, `AUTH_SECRET` (generate with `npx auth secret` or any 32+ random bytes, base64), and `ALLOWED_EMAILS=wesley@vosk.co.za`. Leave `APP_PASSCODE` as it is.
   6. Tell Claude when done.
 - [ ] **Step 7:** Only after Wesley confirms Step 6: `git checkout master && git merge --ff-only multi-user`, then `git push` as its own command.
+  - Revert path: the `ListEntry` to `Title` FK is `ON DELETE RESTRICT`, so the old code's Remove fails with `P2003` against the migrated DB. If release 1 is reverted, first run (after reading it) `ALTER TABLE "ListEntry" DROP CONSTRAINT "ListEntry_titleId_fkey";`.
 - [ ] **Step 8:** Wait for the Vercel deploy to be Ready (the build applies the migration). Run `npx tsx scripts/check-multi-user-migration.ts`. Expected: counts match, diff 0.
-- [ ] **Step 9: Wesley's live checks**, in order: hard-reload; sign in from the installed iPhone PWA (spec section 14); confirm the list, a rating, a note and a pin look right; sign out and back in; try a non-allowlisted Google account and see the not-invited message. If PWA sign-in fails, stop and investigate before inviting anyone.
+- [ ] **Step 9: Wesley's live checks**, in order: hard-reload; sign in from the installed iPhone PWA (spec section 14); confirm the list, a rating, a note and a pin look right; sign out and back in; try a non-allowlisted Google account and see the not-invited message. If PWA sign-in fails, stop and investigate before inviting anyone. Don't add, edit or remove titles while the release-1 deploy is building.
 - [ ] **Step 10:** After a few days of solo use and Wesley's go-ahead, he adds friends' emails to `ALLOWED_EMAILS` and redeploys. From here release 1 is fix-forward only.
 
 ### Task 10: Release 2 cleanup (later, only on Wesley's go-ahead)

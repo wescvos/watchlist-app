@@ -24,6 +24,11 @@ export default async function SignInPage({
             You&apos;re not on the invite list. Ask Wesley to add you.
           </p>
         )}
+        {error && error !== "AccessDenied" && (
+          <p role="alert" className="text-sm text-center text-red-600 dark:text-red-400">
+            Sign-in didn&apos;t complete (code: {error}). Try again, or open the app in Safari and sign in there.
+          </p>
+        )}
         <button className="w-full rounded-lg bg-foreground p-3 font-medium text-background transition-opacity hover:opacity-90 active:opacity-80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground focus-visible:ring-offset-2 focus-visible:ring-offset-background">
           Sign in with Google
         </button>

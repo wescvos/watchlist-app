@@ -64,6 +64,10 @@ Sign-in is Google only. Create an OAuth client (Web application) in the Google C
 
 Each person gets their own list over a shared title catalog. To remove someone, delete their email from `ALLOWED_EMAILS` and redeploy: they are signed out and cannot sign back in.
 
+## Rolling back release 1
+
+The `ListEntry` to `Title` foreign key is `ON DELETE RESTRICT`, so the pre-multi-user code's Remove (`prisma.title.delete`) fails with `P2003` against the migrated database, both while the deploy is in flight and after any revert of release 1. If release 1 is reverted, first run (after reading it) `ALTER TABLE "ListEntry" DROP CONSTRAINT "ListEntry_titleId_fkey";` so the old Remove works again. Also, don't add, edit or remove titles while the release-1 deploy is building.
+
 ## Local setup
 
 ```bash

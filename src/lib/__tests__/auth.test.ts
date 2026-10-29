@@ -13,7 +13,24 @@ const upsert = prisma.user.upsert as unknown as ReturnType<typeof vi.fn>;
 describe("authCallbacks", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubEnv("ALLOWED_EMAILS", "wesley@vosk.co.za");
     upsert.mockResolvedValue({ id: "u1" });
+  });
+
+  it("signIn allows a verified, allowlisted email", () => {
+    expect(authCallbacks.signIn({ user: { email: "wesley@vosk.co.za" }, profile: { email_verified: true } })).toBe(true);
+  });
+
+  it("signIn rejects an unverified email even if allowlisted", () => {
+    expect(authCallbacks.signIn({ user: { email: "wesley@vosk.co.za" }, profile: { email_verified: false } })).toBe(false);
+  });
+
+  it("signIn rejects when the profile is missing", () => {
+    expect(authCallbacks.signIn({ user: { email: "wesley@vosk.co.za" } })).toBe(false);
+  });
+
+  it("signIn rejects a verified email that is not allowlisted", () => {
+    expect(authCallbacks.signIn({ user: { email: "x@example.com" }, profile: { email_verified: true } })).toBe(false);
   });
 
   it("jwt lowercases the email before upserting and stores the user id", async () => {

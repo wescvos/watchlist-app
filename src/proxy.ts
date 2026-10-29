@@ -42,5 +42,5 @@ export function handleProxy(req: NextAuthRequest): NextResponse {
 export const proxy = auth(handleProxy);
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|manifest.webmanifest|icons).*)"],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|manifest.webmanifest|apple-touch-icon.png|icons).*)"],
 };
