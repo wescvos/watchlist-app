@@ -7,9 +7,11 @@ vi.mock("@/lib/titles", () => ({
   addTitle: vi.fn(),
   listTitles: vi.fn(),
   refreshTitle: vi.fn(),
+  getTitle: vi.fn(),
 }));
+vi.mock("@/lib/currentUser", () => ({ getCurrentUserId: vi.fn() }));
 vi.mock("@/lib/prisma", () => ({
-  prisma: { title: { findMany: vi.fn().mockResolvedValue([]) } },
+  prisma: { listEntry: { findMany: vi.fn().mockResolvedValue([]) } },
 }));
 vi.mock("@/lib/mood/tagger", () => ({ tagIfUntagged: vi.fn().mockResolvedValue(undefined) }));
 // Partial mock: keep the real NextResponse, and make after() run its callback
@@ -23,11 +25,17 @@ vi.mock("next/server", async (importOriginal) => {
 import { after } from "next/server";
 import { searchTitles } from "@/lib/tmdb";
 import { GET } from "@/app/api/search/route";
-import { PATCH } from "@/app/api/titles/[id]/route";
-import { POST as addTitleRoute } from "@/app/api/titles/route";
+import { PATCH, DELETE } from "@/app/api/titles/[id]/route";
+import { GET as listRoute, POST as addTitleRoute } from "@/app/api/titles/route";
 import { POST as refreshRoute } from "@/app/api/titles/[id]/refresh/route";
-import { updateTitle, addTitle, refreshTitle } from "@/lib/titles";
+import { updateTitle, deleteTitle, addTitle, listTitles, refreshTitle, getTitle } from "@/lib/titles";
+import { getCurrentUserId } from "@/lib/currentUser";
+import { prisma } from "@/lib/prisma";
 import { tagIfUntagged } from "@/lib/mood/tagger";
+
+beforeEach(() => {
+  vi.mocked(getCurrentUserId).mockResolvedValue("u1");
+});
 
 describe("GET /api/search", () => {
   it("returns 400 without q", async () => {
@@ -72,7 +80,7 @@ describe("PATCH /api/titles/:id validation", () => {
     (updateTitle as any).mockResolvedValue({ id: "abc", myRating: 7 });
     const res = await PATCH(patchReq({ myRating: 7 }), ctx);
     expect(res.status).toBe(200);
-    expect(updateTitle).toHaveBeenCalledWith("abc", { myRating: 7 });
+    expect(updateTitle).toHaveBeenCalledWith("u1", "abc", { myRating: 7 });
   });
 });
 
@@ -85,7 +93,7 @@ describe("POST /api/titles status validation", () => {
     (addTitle as any).mockResolvedValue({ id: "x", status: "WANT" });
     const res = await addTitleRoute(new Request("http://x/api/titles", { method: "POST", body: JSON.stringify({ tmdbId: 1, mediaType: "MOVIE" }) }));
     expect(res.status).toBe(200);
-    expect(addTitle).toHaveBeenCalledWith(1, "MOVIE", "WANT");
+    expect(addTitle).toHaveBeenCalledWith("u1", 1, "MOVIE", "WANT");
   });
 });
 
@@ -141,6 +149,7 @@ describe("mood tagging is scheduled, never awaited", () => {
   });
 
   it("schedules tagging after a refresh", async () => {
+    asMock(getTitle).mockResolvedValue({ id: "abc" });
     asMock(refreshTitle).mockResolvedValue({ id: "abc" });
 
     const res = await refreshRoute(new Request("http://x/api/titles/abc/refresh", { method: "POST" }), ctx);
@@ -150,6 +159,7 @@ describe("mood tagging is scheduled, never awaited", () => {
   });
 
   it("does not schedule tagging when the refresh failed", async () => {
+    asMock(getTitle).mockResolvedValue({ id: "abc" });
     asMock(refreshTitle).mockRejectedValue(new Error("tmdb down"));
 
     const res = await refreshRoute(new Request("http://x/api/titles/abc/refresh", { method: "POST" }), ctx);
@@ -167,5 +177,111 @@ describe("mood tagging is scheduled, never awaited", () => {
     const res = await addTitleRoute(addReq({ tmdbId: 1, mediaType: "MOVIE" }));
 
     expect(res.status).toBe(200);
+  });
+});
+
+describe("auth and per-user scoping", () => {
+  const asMock = (fn: unknown) => fn as Mock;
+  const refreshReq = () => new Request("http://x/api/titles/abc/refresh", { method: "POST" });
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    asMock(getCurrentUserId).mockResolvedValue("u1");
+  });
+
+  describe("401 when signed out, with no data function called", () => {
+    beforeEach(() => asMock(getCurrentUserId).mockResolvedValue(null));
+
+    async function expect401(res: Response) {
+      expect(res.status).toBe(401);
+      expect(await res.json()).toEqual({ error: "Unauthorized" });
+    }
+
+    it("GET /api/titles", async () => {
+      await expect401(await listRoute(new Request("http://x/api/titles")));
+      expect(listTitles).not.toHaveBeenCalled();
+    });
+    it("POST /api/titles", async () => {
+      const req = new Request("http://x/api/titles", { method: "POST", body: JSON.stringify({ tmdbId: 1, mediaType: "MOVIE" }) });
+      await expect401(await addTitleRoute(req));
+      expect(addTitle).not.toHaveBeenCalled();
+    });
+    it("PATCH /api/titles/:id", async () => {
+      await expect401(await PATCH(patchReq({ myRating: 7 }), ctx));
+      expect(updateTitle).not.toHaveBeenCalled();
+    });
+    it("DELETE /api/titles/:id", async () => {
+      await expect401(await DELETE(new Request("http://x/api/titles/abc", { method: "DELETE" }), ctx));
+      expect(deleteTitle).not.toHaveBeenCalled();
+    });
+    it("POST refresh", async () => {
+      await expect401(await refreshRoute(refreshReq(), ctx));
+      expect(getTitle).not.toHaveBeenCalled();
+      expect(refreshTitle).not.toHaveBeenCalled();
+      expect(tagIfUntagged).not.toHaveBeenCalled();
+    });
+    it("GET /api/search", async () => {
+      await expect401(await GET(new Request("http://x/api/search?q=dune")));
+      expect(searchTitles).not.toHaveBeenCalled();
+      expect(prisma.listEntry.findMany).not.toHaveBeenCalled();
+    });
+  });
+
+  it("GET /api/titles lists for the signed-in user", async () => {
+    asMock(listTitles).mockResolvedValue([]);
+    await listRoute(new Request("http://x/api/titles?status=WATCHED"));
+    expect(listTitles).toHaveBeenCalledWith("u1", "WATCHED");
+  });
+
+  it("PATCH 404s when the user has no entry", async () => {
+    asMock(updateTitle).mockResolvedValue(null);
+    const res = await PATCH(patchReq({ myRating: 7 }), ctx);
+    expect(res.status).toBe(404);
+    expect(updateTitle).toHaveBeenCalledWith("u1", "abc", { myRating: 7 });
+  });
+
+  it("DELETE passes the user through and returns ok", async () => {
+    asMock(deleteTitle).mockResolvedValue(true);
+    const res = await DELETE(new Request("http://x/api/titles/abc", { method: "DELETE" }), ctx);
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
+    expect(deleteTitle).toHaveBeenCalledWith("u1", "abc");
+  });
+
+  it("DELETE 404s when the user has no entry", async () => {
+    asMock(deleteTitle).mockResolvedValue(false);
+    const res = await DELETE(new Request("http://x/api/titles/abc", { method: "DELETE" }), ctx);
+    expect(res.status).toBe(404);
+  });
+
+  it("refresh 404s without refreshing or tagging when the user has no entry", async () => {
+    asMock(getTitle).mockResolvedValue(null);
+    const res = await refreshRoute(refreshReq(), ctx);
+    expect(res.status).toBe(404);
+    expect(getTitle).toHaveBeenCalledWith("u1", "abc");
+    expect(refreshTitle).not.toHaveBeenCalled();
+    expect(tagIfUntagged).not.toHaveBeenCalled();
+  });
+
+  it("refresh refreshes the catalog then returns the user's view", async () => {
+    const listed = { id: "abc", status: "WANT", note: "mine" };
+    asMock(getTitle).mockResolvedValueOnce({ id: "abc" }).mockResolvedValueOnce(listed);
+    asMock(refreshTitle).mockResolvedValue({ id: "abc" });
+    const res = await refreshRoute(refreshReq(), ctx);
+    expect(res.status).toBe(200);
+    expect(refreshTitle).toHaveBeenCalledWith("abc");
+    expect(await res.json()).toEqual(listed);
+  });
+
+  it("search marks library only from the signed-in user's entries", async () => {
+    asMock(searchTitles).mockResolvedValue([{ tmdbId: 1, mediaType: "MOVIE", title: "Dune", year: 2021, posterUrl: null }]);
+    asMock(prisma.listEntry.findMany).mockResolvedValue([
+      { status: "WATCHED", title: { id: "t1", tmdbId: 1, mediaType: "MOVIE" } },
+    ]);
+    const res = await GET(new Request("http://x/api/search?q=dune"));
+    const body = await res.json();
+    expect(body[0].library).toEqual({ id: "t1", status: "WATCHED" });
+    const arg = asMock(prisma.listEntry.findMany).mock.calls[0][0];
+    expect(arg.where.userId).toBe("u1");
   });
 });

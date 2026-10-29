@@ -1,12 +1,11 @@
 import { NextResponse } from "next/server";
 import { updateTitle, deleteTitle } from "@/lib/titles";
+import { getCurrentUserId } from "@/lib/currentUser";
 import { Status } from "@prisma/client";
 
-function isNotFound(e: unknown): boolean {
-  return typeof e === "object" && e !== null && (e as { code?: string }).code === "P2025";
-}
-
 export async function PATCH(req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const userId = await getCurrentUserId();
+  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { id } = await params;
   const body = await req.json().catch(() => null);
   if (!body || typeof body !== "object") {
@@ -40,20 +39,24 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     patch.pinned = body.pinned;
   }
   try {
-    return NextResponse.json(await updateTitle(id, patch));
-  } catch (e) {
-    if (isNotFound(e)) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    const updated = await updateTitle(userId, id, patch);
+    if (!updated) return NextResponse.json({ error: "Not found" }, { status: 404 });
+    return NextResponse.json(updated);
+  } catch {
     return NextResponse.json({ error: "Update failed" }, { status: 500 });
   }
 }
 
 export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const userId = await getCurrentUserId();
+  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const { id } = await params;
   try {
-    await deleteTitle(id);
+    if (!(await deleteTitle(userId, id))) {
+      return NextResponse.json({ error: "Not found" }, { status: 404 });
+    }
     return NextResponse.json({ ok: true });
-  } catch (e) {
-    if (isNotFound(e)) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  } catch {
     return NextResponse.json({ error: "Delete failed" }, { status: 500 });
   }
 }

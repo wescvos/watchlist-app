@@ -1,20 +1,25 @@
 import { NextResponse, after } from "next/server";
 import { listTitles, addTitle } from "@/lib/titles";
+import { getCurrentUserId } from "@/lib/currentUser";
 import { tagIfUntagged } from "@/lib/mood/tagger";
 import { Status } from "@prisma/client";
 import type { MediaKind } from "@/lib/types";
 
 export async function GET(req: Request) {
+  const userId = await getCurrentUserId();
+  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const raw = new URL(req.url).searchParams.get("status");
   const status = raw === "WANT" || raw === "WATCHED" ? (raw as Status) : undefined;
   try {
-    return NextResponse.json(await listTitles(status));
+    return NextResponse.json(await listTitles(userId, status));
   } catch {
     return NextResponse.json({ error: "Failed to load titles" }, { status: 500 });
   }
 }
 
 export async function POST(req: Request) {
+  const userId = await getCurrentUserId();
+  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const body = await req.json().catch(() => null);
   const tmdbId = Number(body?.tmdbId);
   const mediaType = body?.mediaType as MediaKind;
@@ -29,7 +34,7 @@ export async function POST(req: Request) {
     status = body.status;
   }
   try {
-    const title = await addTitle(tmdbId, mediaType, status);
+    const title = await addTitle(userId, tmdbId, mediaType, status);
     // Mood-tag after the response is sent, so "+ Add" never waits on Gemini.
     // after() rather than a bare unawaited promise: on Vercel the function can
     // be frozen before a detached promise settles. tagIfUntagged is a no-op for
