@@ -49,6 +49,10 @@ model Title {
   metacriticScore  String?
   fetchedAt        DateTime  @default(now())
 
+  // RELEASE 1 LEFTOVERS: the personal columns below moved to ListEntry, which
+  // now owns them per user. They stay on Title for one release so the previous
+  // deploy keeps working against the migrated database, and are dropped in
+  // release 2. No new code reads or writes them.
   status    Status    @default(WANT)
   note      String?
   myRating  Int?
@@ -57,7 +61,43 @@ model Title {
   addedAt   DateTime  @default(now())
   watchedAt DateTime?
 
+  entries ListEntry[]
+
   @@unique([tmdbId, mediaType])
+}
+
+model User {
+  id        String   @id @default(cuid())
+  // Stored lowercase; the allowlist comparison is case-insensitive.
+  email     String   @unique
+  name      String?
+  image     String?
+  createdAt DateTime @default(now())
+
+  entries ListEntry[]
+}
+
+// One user's relationship to a shared Title: their status, note, rating and pin.
+// Title stays the shared catalogue; everything personal lives here.
+model ListEntry {
+  id        String    @id @default(cuid())
+  userId    String
+  titleId   String
+  status    Status    @default(WANT)
+  note      String?
+  myRating  Int?
+  pinned    Boolean   @default(false)
+  pinnedAt  DateTime?
+  addedAt   DateTime  @default(now())
+  watchedAt DateTime?
+
+  // Deleting a user removes their list, but a Title is shared by everyone, so
+  // it can never be deleted out from under entries that reference it.
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title Title @relation(fields: [titleId], references: [id], onDelete: Restrict)
+
+  @@unique([userId, titleId])
+  @@index([userId, status])
 }
 
 // RETAINED INTENTIONALLY, no longer read by any code. The For You feature that
