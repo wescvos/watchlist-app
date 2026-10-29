@@ -8,6 +8,15 @@ export interface OmdbScores {
 
 const EMPTY: OmdbScores = { imdbScore: null, rtScore: null, metacriticScore: null };
 
+// The slice of OMDb's JSON this module reads. OMDb reports "N/A" rather than
+// omitting a missing score, which the mapping below filters out.
+interface OmdbResponse {
+  Response?: string;
+  Ratings?: { Source: string; Value: string }[];
+  imdbRating?: string;
+  Metascore?: string;
+}
+
 export async function getScoresByImdbId(imdbId: string): Promise<OmdbScores> {
   const url = new URL("https://www.omdbapi.com/");
   url.searchParams.set("apikey", env.omdbKey);
@@ -15,7 +24,7 @@ export async function getScoresByImdbId(imdbId: string): Promise<OmdbScores> {
 
   const res = await fetch(url.toString());
   if (!res.ok) return EMPTY;
-  let data: any;
+  let data: OmdbResponse;
   try {
     data = await res.json();
   } catch {

@@ -43,7 +43,7 @@ describe("GET /api/search", () => {
     expect(res.status).toBe(400);
   });
   it("returns results for q", async () => {
-    (searchTitles as any).mockResolvedValue([{ tmdbId: 1, mediaType: "MOVIE", title: "Dune", year: 2021, posterUrl: null }]);
+    (searchTitles as Mock).mockResolvedValue([{ tmdbId: 1, mediaType: "MOVIE", title: "Dune", year: 2021, posterUrl: null }]);
     const res = await GET(new Request("http://x/api/search?q=dune"));
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -77,7 +77,7 @@ describe("PATCH /api/titles/:id validation", () => {
     expect(res.status).toBe(400);
   });
   it("accepts a valid patch and calls updateTitle", async () => {
-    (updateTitle as any).mockResolvedValue({ id: "abc", myRating: 7 });
+    (updateTitle as Mock).mockResolvedValue({ id: "abc", myRating: 7 });
     const res = await PATCH(patchReq({ myRating: 7 }), ctx);
     expect(res.status).toBe(200);
     expect(updateTitle).toHaveBeenCalledWith("u1", "abc", { myRating: 7 });
@@ -90,7 +90,7 @@ describe("POST /api/titles status validation", () => {
     expect(res.status).toBe(400);
   });
   it("defaults to WANT when status omitted", async () => {
-    (addTitle as any).mockResolvedValue({ id: "x", status: "WANT" });
+    (addTitle as Mock).mockResolvedValue({ id: "x", status: "WANT" });
     const res = await addTitleRoute(new Request("http://x/api/titles", { method: "POST", body: JSON.stringify({ tmdbId: 1, mediaType: "MOVIE" }) }));
     expect(res.status).toBe(200);
     expect(addTitle).toHaveBeenCalledWith("u1", 1, "MOVIE", "WANT");

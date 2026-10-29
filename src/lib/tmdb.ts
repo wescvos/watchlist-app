@@ -41,6 +41,30 @@ const MAX_ATTEMPTS = 2;
 
 // TMDb is occasionally slow or transiently 5xx/timeouts; retry once and cap
 // the wait so a hung request fails on our terms instead of the platform's.
+// The slices of TMDb's JSON this module reads. Wire shapes, so every field is
+// optional: TMDb omits rather than nulls in several places.
+interface RawSearchHit {
+  id: number;
+  media_type?: string;
+  title?: string;
+  name?: string;
+  release_date?: string;
+  first_air_date?: string;
+  poster_path?: string | null;
+  popularity?: number;
+  vote_count?: number;
+}
+interface RawCredit {
+  name: string;
+  character?: string;
+  job?: string;
+  profile_path?: string | null;
+}
+interface RawProvider {
+  provider_name: string;
+  logo_path?: string | null;
+}
+
 async function tmdbGet(pathname: string, params: Record<string, string> = {}) {
   const url = new URL(`${BASE}${pathname}`);
   url.searchParams.set("api_key", env.tmdbKey);
@@ -99,13 +123,13 @@ export function relaxationCandidates(query: string): string[] {
 async function searchOnce(query: string): Promise<SearchResult[]> {
   const data = await tmdbGet("/search/multi", { query, include_adult: "false" });
   return (data.results ?? [])
-    .filter((r: any) => r.media_type === "movie" || r.media_type === "tv")
-    .map((r: any): SearchResult => {
+    .filter((r: RawSearchHit) => r.media_type === "movie" || r.media_type === "tv")
+    .map((r: RawSearchHit): SearchResult => {
       const mediaType: MediaKind = r.media_type === "movie" ? "MOVIE" : "TV";
       return {
         tmdbId: r.id,
         mediaType,
-        title: r.title ?? r.name,
+        title: (r.title ?? r.name)!,
         year: yearOf(r.release_date ?? r.first_air_date),
         posterUrl: poster(r.poster_path ?? null),
         popularity: typeof r.popularity === "number" ? r.popularity : 0,
@@ -133,10 +157,10 @@ export async function getTitleDetails(tmdbId: number, mediaType: MediaKind): Pro
 
   const cast: CastMember[] = (data.credits?.cast ?? [])
     .slice(0, 15)
-    .map((c: any) => ({ name: c.name, character: c.character ?? "", profileUrl: profile(c.profile_path) }));
+    .map((c: RawCredit) => ({ name: c.name, character: c.character ?? "", profileUrl: profile(c.profile_path) }));
 
   const director =
-    (data.credits?.crew ?? []).find((c: any) => c.job === "Director")?.name ?? null;
+    (data.credits?.crew ?? []).find((c: RawCredit) => c.job === "Director")?.name ?? null;
 
   const runtime =
     mediaType === "MOVIE"
@@ -153,7 +177,7 @@ export async function getTitleDetails(tmdbId: number, mediaType: MediaKind): Pro
   // JustWatch-sourced, via TMDb; flatrate only — this is a watchlist, not a
   // rent/buy shopping guide.
   const regionProviders = data["watch/providers"]?.results?.[WATCH_REGION];
-  const watchProviders: WatchProvider[] = (regionProviders?.flatrate ?? []).map((p: any) => ({
+  const watchProviders: WatchProvider[] = (regionProviders?.flatrate ?? []).map((p: RawProvider) => ({
     name: p.provider_name,
     logoUrl: providerLogo(p.logo_path),
   }));
@@ -171,8 +195,8 @@ export async function getTitleDetails(tmdbId: number, mediaType: MediaKind): Pro
     // TMDb returns "" rather than omitting the field when there's no tagline.
     tagline: data.tagline || null,
     runtime,
-    genres: (data.genres ?? []).map((g: any) => g.name),
-    spokenLanguages: (data.spoken_languages ?? []).map((l: any) => l.english_name).filter(Boolean),
+    genres: (data.genres ?? []).map((g: { name: string }) => g.name),
+    spokenLanguages: (data.spoken_languages ?? []).map((l: { english_name?: string }) => l.english_name).filter(Boolean),
     cast,
     director,
     tmdbScore: typeof data.vote_average === "number" ? data.vote_average : null,

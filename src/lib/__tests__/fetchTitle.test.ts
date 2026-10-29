@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, type Mock } from "vitest";
 
 vi.mock("@/lib/tmdb", () => ({
   getTitleDetails: vi.fn(),
@@ -23,8 +23,8 @@ describe("fetchMergedTitle", () => {
   });
 
   it("merges TMDb details with OMDb scores when imdbId present", async () => {
-    (getTitleDetails as any).mockResolvedValue(base);
-    (getScoresByImdbId as any).mockResolvedValue({ imdbScore: "8.0", rtScore: "83%", metacriticScore: "74" });
+    (getTitleDetails as Mock).mockResolvedValue(base);
+    (getScoresByImdbId as Mock).mockResolvedValue({ imdbScore: "8.0", rtScore: "83%", metacriticScore: "74" });
     const out = await fetchMergedTitle(1, "MOVIE");
     expect(out.rtScore).toBe("83%");
     expect(out.title).toBe("Dune");
@@ -32,7 +32,7 @@ describe("fetchMergedTitle", () => {
   });
 
   it("skips OMDb and returns null scores when no imdbId", async () => {
-    (getTitleDetails as any).mockResolvedValue({ ...base, imdbId: null });
+    (getTitleDetails as Mock).mockResolvedValue({ ...base, imdbId: null });
     const out = await fetchMergedTitle(1, "MOVIE");
     expect(out.imdbScore).toBeNull();
     expect(getScoresByImdbId).not.toHaveBeenCalled();
