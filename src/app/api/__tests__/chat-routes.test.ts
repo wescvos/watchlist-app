@@ -16,7 +16,7 @@ vi.mock("@/lib/chat/messages", async (importOriginal) => {
     getMessages: vi.fn(),
     sendText: vi.fn(),
     sendTitle: vi.fn(),
-    toggleHeart: vi.fn(),
+    setHeart: vi.fn(),
   };
 });
 vi.mock("@/lib/prisma", () => ({ prisma: {} }));
@@ -24,7 +24,7 @@ vi.mock("@/lib/prisma", () => ({ prisma: {} }));
 import { getCurrentUserId } from "@/lib/currentUser";
 import { listPeople, isActiveUser } from "@/lib/chat/people";
 import { getOrCreateConversation, listConversations, markRead, unreadCount } from "@/lib/chat/conversations";
-import { ChatInputError, getMessages, sendText, sendTitle, toggleHeart } from "@/lib/chat/messages";
+import { ChatInputError, getMessages, sendText, sendTitle, setHeart } from "@/lib/chat/messages";
 import { GET as peopleGet } from "@/app/api/chat/people/route";
 import { GET as unreadGet } from "@/app/api/chat/unread/route";
 import { GET as convList, POST as convPost } from "@/app/api/chat/conversations/route";
@@ -52,7 +52,7 @@ describe("unauthenticated", () => {
     ["msg get", () => msgGet(get(), ctx)],
     ["msg post", () => msgPost(post({ text: "hi" }), ctx)],
     ["read", () => readPost(post({}), ctx)],
-    ["heart", () => heartPost(post({}), ctx)],
+    ["heart", () => heartPost(post({ hearted: true }), ctx)],
     ["send", () => sendPost(post({ recipientIds: ["u2"], tmdbId: 1, mediaType: "MOVIE" }))],
   ];
   it.each(cases)("%s returns 401 with no data call", async (_n, call) => {
@@ -60,7 +60,7 @@ describe("unauthenticated", () => {
     const res = await call();
     expect(res.status).toBe(401);
     expect(await res.json()).toEqual({ error: "Unauthorized" });
-    for (const m of [listPeople, isActiveUser, getOrCreateConversation, listConversations, markRead, unreadCount, getMessages, sendText, sendTitle, toggleHeart]) {
+    for (const m of [listPeople, isActiveUser, getOrCreateConversation, listConversations, markRead, unreadCount, getMessages, sendText, sendTitle, setHeart]) {
       expect(m).not.toHaveBeenCalled();
     }
   });
@@ -105,9 +105,12 @@ describe("happy paths", () => {
     expect(await (await readPost(post({}), ctx)).json()).toEqual({ ok: true });
   });
   it("heart", async () => {
-    vi.mocked(toggleHeart).mockResolvedValue({ hearted: true });
-    expect(await (await heartPost(post({}), ctx)).json()).toEqual({ hearted: true });
-    expect(toggleHeart).toHaveBeenCalledWith("u1", "c1");
+    vi.mocked(setHeart).mockResolvedValue({ hearted: true });
+    expect(await (await heartPost(post({ hearted: true }), ctx)).json()).toEqual({ hearted: true });
+    expect(setHeart).toHaveBeenCalledWith("u1", "c1", true);
+    vi.mocked(setHeart).mockResolvedValue({ hearted: false });
+    expect(await (await heartPost(post({ hearted: false }), ctx)).json()).toEqual({ hearted: false });
+    expect(setHeart).toHaveBeenLastCalledWith("u1", "c1", false);
   });
   it("send", async () => {
     vi.mocked(sendTitle).mockResolvedValue({ conversationIds: ["c1"] });
@@ -133,8 +136,8 @@ describe("404 mapping", () => {
     expect((await readPost(post({}), ctx)).status).toBe(404);
   });
   it("heart", async () => {
-    vi.mocked(toggleHeart).mockResolvedValue(null);
-    expect((await heartPost(post({}), ctx)).status).toBe(404);
+    vi.mocked(setHeart).mockResolvedValue(null);
+    expect((await heartPost(post({ hearted: true }), ctx)).status).toBe(404);
   });
 });
 
@@ -156,6 +159,7 @@ describe("400 mapping", () => {
       () => convPost(post("{nope")),
       () => msgPost(post("{nope"), ctx),
       () => sendPost(post("{nope")),
+      () => heartPost(post("{nope"), ctx),
     ]) {
       expect((await call()).status).toBe(400);
     }
@@ -173,6 +177,12 @@ describe("400 mapping", () => {
       { recipientIds: ["u2"], tmdbId: 1, mediaType: "MOVIE", text: 4 },
     ];
     for (const b of bad) expect((await sendPost(post(b))).status).toBe(400);
+    for (const b of [{}, { hearted: "true" }, { hearted: 1 }, { hearted: null }]) {
+      const res = await heartPost(post(b), ctx);
+      expect(res.status).toBe(400);
+      expect(await res.json()).toEqual({ error: "hearted must be a boolean" });
+    }
+    expect(setHeart).not.toHaveBeenCalled();
     expect(sendTitle).not.toHaveBeenCalled();
     expect(sendText).not.toHaveBeenCalled();
   });

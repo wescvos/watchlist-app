@@ -5,7 +5,7 @@ import type { ChatMessage, ChatPage } from "@/lib/chat/messages";
 const push = vi.fn();
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
 
-import { ChatThread } from "@/app/chats/[id]/ChatThread";
+import { ChatThread, mergeMessages } from "@/app/chats/[id]/ChatThread";
 import { ChatTitleCard } from "@/components/ChatTitleCard";
 
 const ME = "me";
@@ -96,8 +96,8 @@ describe("ChatTitleCard", () => {
 
 describe("ChatThread", () => {
   it("shows Seen only under my latest message, and only once read", () => {
-    mockFetch((url) => (url.endsWith("/messages") ? { body: page([msg(1), msg(2), msg(4), msg(5)]) } : undefined));
-    const messages = [msg(1), msg(2), msg(4), msg(5)];
+    const messages = [msg(1), msg(2), msg(3), msg(4)];
+    mockFetch((url) => (url.endsWith("/messages") ? { body: page(messages) } : undefined));
     const { unmount } = renderThread(page(messages, { otherLastReadAt: at(3) }));
     // My latest is msg 4 (at 4s), read at 3s: not seen yet.
     expect(screen.queryByText("Seen")).toBeNull();
@@ -107,6 +107,94 @@ describe("ChatThread", () => {
     const seen = screen.getAllByText("Seen");
     expect(seen).toHaveLength(1);
     expect(seen[0].closest("[data-message-id]")).toHaveAttribute("data-message-id", "m004");
+  });
+
+  it("shows no Seen when the thread ends with their message", () => {
+    const messages = [msg(1), msg(2), msg(4), msg(5)];
+    mockFetch((url) => (url.endsWith("/messages") ? { body: page(messages) } : undefined));
+    // They read past my msg 4, but their msg 5 is the newest.
+    renderThread(page(messages, { otherLastReadAt: at(5) }));
+    expect(screen.queryByText("Seen")).toBeNull();
+  });
+
+  it("mergeMessages returns the same array when a poll changes nothing", () => {
+    const current = [msg(1, { heartedBy: [ME] }), msg(2)];
+    const same = [msg(1, { heartedBy: [ME] }), msg(2)];
+    expect(mergeMessages(current, same)).toBe(current);
+    expect(mergeMessages(current, [msg(1)])).not.toBe(current);
+    expect(mergeMessages(current, [msg(2, { viewerStatus: "WANT" })])).not.toBe(current);
+    expect(mergeMessages(current, [msg(3)])).toHaveLength(3);
+  });
+
+  it("an identical poll does not pull a near-bottom reader back down", async () => {
+    const messages = [msg(1), msg(2)];
+    mockFetch((url) => (url.endsWith("/messages") ? { body: page(messages) } : undefined));
+    const { container } = renderThread(page(messages));
+    const el = container.querySelector(".overflow-y-auto") as HTMLDivElement;
+    let top = 0;
+    const writes: number[] = [];
+    Object.defineProperty(el, "scrollHeight", { configurable: true, get: () => 1000 });
+    Object.defineProperty(el, "clientHeight", { configurable: true, get: () => 300 });
+    Object.defineProperty(el, "scrollTop", {
+      configurable: true,
+      get: () => top,
+      set: (v: number) => {
+        top = v;
+        writes.push(v);
+      },
+    });
+    await act(async () => {});
+    // The reader scrolls up 100px: still within the near-bottom band.
+    top = 600;
+    fireEvent.scroll(el);
+    writes.length = 0;
+    await poll();
+    await poll();
+    expect(writes).toEqual([]);
+    expect(top).toBe(600);
+  });
+
+  it("a poll during an in-flight heart keeps the optimistic heart", async () => {
+    let finishHeart: (v: { hearted: boolean }) => void = () => {};
+    let finishPoll: (() => void) | null = null;
+    let holdPoll = false;
+    fetchMock = vi.fn((url: string, init?: RequestInit) => {
+      const json = (body: unknown) => ({ ok: true, status: 200, json: () => Promise.resolve(body) });
+      if (url.endsWith("/heart")) {
+        return new Promise((r) => {
+          finishHeart = (v) => r(json(v));
+        });
+      }
+      if (url.endsWith("/messages") && !init) {
+        // The server has not seen the heart yet: stale heartedBy.
+        if (holdPoll) return new Promise((r) => (finishPoll = () => r(json(page([msg(1)])))));
+        return Promise.resolve(json(page([msg(1)])));
+      }
+      return Promise.resolve(json({ ok: true }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    renderThread(page([msg(1)]));
+    fireEvent.click(screen.getByRole("button", { name: "Heart message" }));
+    expect(screen.getByRole("img", { name: "Hearted" })).toBeInTheDocument();
+    const heartCall = fetchMock.mock.calls.find((c) => c[0] === "/api/chat/messages/m001/heart");
+    expect(JSON.parse(heartCall?.[1].body)).toEqual({ hearted: true });
+
+    // A stale poll while the request is in flight.
+    await poll();
+    expect(screen.getByRole("img", { name: "Hearted" })).toBeInTheDocument();
+
+    // A stale poll that began before the heart settled but lands after it.
+    holdPoll = true;
+    await poll();
+    await act(async () => finishHeart({ hearted: true }));
+    await act(async () => finishPoll?.());
+    expect(screen.getByRole("img", { name: "Hearted" })).toBeInTheDocument();
+
+    // Un-hearting sends the desired state, not a toggle.
+    fireEvent.click(screen.getByRole("button", { name: "Remove heart" }));
+    const last = fetchMock.mock.calls.filter((c) => c[0] === "/api/chat/messages/m001/heart").at(-1);
+    expect(JSON.parse(last?.[1].body)).toEqual({ hearted: false });
+    expect(screen.queryByRole("img", { name: "Hearted" })).toBeNull();
   });
 
   it("toggles the heart after a double tap", async () => {
@@ -125,6 +213,8 @@ describe("ChatThread", () => {
     await waitFor(() =>
       expect(fetchMock.mock.calls.some((c) => c[0] === "/api/chat/messages/m001/heart")).toBe(true),
     );
+    const call = fetchMock.mock.calls.find((c) => c[0] === "/api/chat/messages/m001/heart");
+    expect(JSON.parse(call?.[1].body)).toEqual({ hearted: true });
   });
 
   it("double-tapping a card hearts it and does not navigate", async () => {

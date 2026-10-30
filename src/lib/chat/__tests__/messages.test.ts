@@ -4,7 +4,7 @@ vi.mock("@/lib/prisma", () => ({
   prisma: {
     conversation: { upsert: vi.fn(), update: vi.fn() },
     message: { create: vi.fn(), findMany: vi.fn(), findFirst: vi.fn(), findUnique: vi.fn() },
-    reaction: { findUnique: vi.fn(), create: vi.fn(), deleteMany: vi.fn() },
+    reaction: { upsert: vi.fn(), deleteMany: vi.fn() },
     listEntry: { findUnique: vi.fn(), findMany: vi.fn(), create: vi.fn(), upsert: vi.fn() },
     $transaction: vi.fn(async (ops: unknown[]) => ops),
   },
@@ -27,7 +27,7 @@ import {
   getMessages,
   sendText,
   sendTitle,
-  toggleHeart,
+  setHeart,
   PAGE_SIZE,
 } from "@/lib/chat/messages";
 
@@ -245,18 +245,29 @@ describe("getMessages", () => {
   });
 });
 
-describe("toggleHeart", () => {
+describe("setHeart", () => {
   const msg = { id: "m1", conversation: { userAId: "me", userBId: "z" } };
 
-  it("creates then deletes", async () => {
+  it("hearts with an upsert, so a repeat or concurrent heart never conflicts", async () => {
     m(prisma.message.findUnique).mockResolvedValue(msg as never);
-    m(prisma.reaction.findUnique)
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce({ id: "r" } as never);
-    expect(await toggleHeart("me", "m1")).toEqual({ hearted: true });
-    expect(prisma.reaction.create).toHaveBeenCalledTimes(1);
-    expect(await toggleHeart("me", "m1")).toEqual({ hearted: false });
-    expect(prisma.reaction.deleteMany).toHaveBeenCalledTimes(1);
+    expect(await setHeart("me", "m1", true)).toEqual({ hearted: true });
+    expect(await setHeart("me", "m1", true)).toEqual({ hearted: true });
+    expect(prisma.reaction.upsert).toHaveBeenCalledTimes(2);
+    expect(prisma.reaction.upsert).toHaveBeenCalledWith({
+      where: { messageId_userId: { messageId: "m1", userId: "me" } },
+      create: { messageId: "m1", userId: "me" },
+      update: {},
+    });
+    expect(prisma.reaction.deleteMany).not.toHaveBeenCalled();
+    expect(prisma.conversation.update).not.toHaveBeenCalled();
+  });
+
+  it("un-hearts with deleteMany, so a repeat un-heart is harmless", async () => {
+    m(prisma.message.findUnique).mockResolvedValue(msg as never);
+    m(prisma.reaction.deleteMany).mockResolvedValue({ count: 0 } as never);
+    expect(await setHeart("me", "m1", false)).toEqual({ hearted: false });
+    expect(prisma.reaction.deleteMany).toHaveBeenCalledWith({ where: { messageId: "m1", userId: "me" } });
+    expect(prisma.reaction.upsert).not.toHaveBeenCalled();
     expect(prisma.conversation.update).not.toHaveBeenCalled();
   });
 
@@ -265,9 +276,11 @@ describe("toggleHeart", () => {
       id: "m1",
       conversation: { userAId: "x", userBId: "y" },
     } as never);
-    expect(await toggleHeart("me", "m1")).toBeNull();
+    expect(await setHeart("me", "m1", true)).toBeNull();
+    expect(await setHeart("me", "m1", false)).toBeNull();
     m(prisma.message.findUnique).mockResolvedValue(null);
-    expect(await toggleHeart("me", "m1")).toBeNull();
-    expect(prisma.reaction.create).not.toHaveBeenCalled();
+    expect(await setHeart("me", "m1", true)).toBeNull();
+    expect(prisma.reaction.upsert).not.toHaveBeenCalled();
+    expect(prisma.reaction.deleteMany).not.toHaveBeenCalled();
   });
 });

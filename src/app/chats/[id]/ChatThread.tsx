@@ -29,15 +29,37 @@ function byTime(a: ChatMessage, b: ChatMessage) {
   return a.createdAt === b.createdAt ? (a.id < b.id ? -1 : 1) : a.createdAt < b.createdAt ? -1 : 1;
 }
 
+// Only hearts and the viewer's list status change after a message is sent.
+function sameMessage(a: ChatMessage, b: ChatMessage) {
+  return (
+    a.viewerStatus === b.viewerStatus &&
+    a.heartedBy.length === b.heartedBy.length &&
+    a.heartedBy.every((u, i) => u === b.heartedBy[i])
+  );
+}
+
 /**
  * Merge by id: incoming messages replace what is held for their ids (so heart
  * and list-status changes, removals included, land) and new ids are added.
  * Anything held but not in `incoming` (older pages from "Load earlier") stays.
+ * Returns `current` itself when nothing differs, so an idle poll re-renders
+ * nothing.
  */
 export function mergeMessages(current: ChatMessage[], incoming: ChatMessage[]): ChatMessage[] {
   const byId = new Map(current.map((m) => [m.id, m]));
-  for (const m of incoming) byId.set(m.id, m);
-  return [...byId.values()].sort(byTime);
+  let changed = false;
+  for (const m of incoming) {
+    const held = byId.get(m.id);
+    if (held && sameMessage(held, m)) continue;
+    byId.set(m.id, m);
+    changed = true;
+  }
+  return changed ? [...byId.values()].sort(byTime) : current;
+}
+
+function withMyHeart(m: ChatMessage, meId: string, on: boolean): ChatMessage {
+  const others = m.heartedBy.filter((u) => u !== meId);
+  return { ...m, heartedBy: on ? [...others, meId] : others };
 }
 
 function HeartIcon({ className }: { className: string }) {
@@ -78,6 +100,10 @@ export function ChatThread({ conversationId, meId, other, otherActive, initialPa
   const lastTap = useRef<{ id: string; at: number } | null>(null);
   const tapTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const tempSeq = useRef(0);
+  // My heart per message id as last requested. While `inFlight`, polls must
+  // not overwrite it with server data that predates the request.
+  const hearts = useRef(new Map<string, { hearted: boolean; inFlight: boolean; seq: number }>());
+  const heartSeq = useRef(0);
 
   const markRead = useCallback(() => {
     fetch(`${base}/read`, { method: "POST" }).catch(() => {});
@@ -93,21 +119,31 @@ export function ChatThread({ conversationId, meId, other, otherActive, initialPa
     };
   }, []);
 
-  function absorb(incoming: ChatMessage[]) {
+  /**
+   * `pinned` lists message ids whose heart was in flight when the fetch began:
+   * their server copy may predate the request, so my heart on them keeps the
+   * requested (or, once settled, confirmed) state instead.
+   */
+  function absorb(incoming: ChatMessage[], pinned: Set<string> = new Set()) {
     const fresh = incoming.filter((m) => !knownIds.current.has(m.id));
     for (const m of incoming) knownIds.current.add(m.id);
-    setMessages((cur) => mergeMessages(cur, incoming));
+    const adjusted = incoming.map((m) => {
+      const h = hearts.current.get(m.id);
+      return h && (h.inFlight || pinned.has(m.id)) ? withMyHeart(m, meId, h.hearted) : m;
+    });
+    setMessages((cur) => mergeMessages(cur, adjusted));
     return fresh;
   }
 
   usePolling(async () => {
+    const pinned = new Set([...hearts.current].flatMap(([id, h]) => (h.inFlight ? [id] : [])));
     const res = await fetch(`${base}/messages`);
     if (!res.ok) return;
     const data = (await res.json()) as ChatPage;
     // hasEarlier is deliberately not taken from polls: it describes the newest
     // window, while the thread may already hold older pages.
     setOtherLastReadAt(data.otherLastReadAt);
-    const fresh = absorb(data.messages);
+    const fresh = absorb(data.messages, pinned);
     if (fresh.some((m) => m.senderId !== meId) && document.visibilityState === "visible") markRead();
   }, 3000);
 
@@ -131,16 +167,30 @@ export function ChatThread({ conversationId, meId, other, otherActive, initialPa
     }
   }
 
+  const newest = messages[messages.length - 1];
+  const newestId = newest?.id;
+  // "Seen" only when the thread ends with my message and they read past it.
+  const seenId =
+    newest &&
+    newest.senderId === meId &&
+    otherLastReadAt &&
+    new Date(otherLastReadAt).getTime() >= new Date(newest.createdAt).getTime()
+      ? newest.id
+      : null;
+
   useLayoutEffect(() => {
     const el = scrollRef.current;
-    if (!el) return;
-    if (anchor.current) {
-      el.scrollTop = el.scrollHeight - anchor.current.height + anchor.current.top;
-      anchor.current = null;
-    } else if (nearBottom.current) {
-      el.scrollTop = el.scrollHeight;
-    }
-  }, [messages, pending, otherLastReadAt]);
+    if (!el || !anchor.current) return;
+    el.scrollTop = el.scrollHeight - anchor.current.height + anchor.current.top;
+    anchor.current = null;
+  }, [messages]);
+
+  // Follow the bottom only when something is added there, so a poll that just
+  // changes a heart never pulls a reader back down.
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (el && nearBottom.current) el.scrollTop = el.scrollHeight;
+  }, [newestId, pending.length, seenId]);
 
   function onScroll() {
     const el = scrollRef.current;
@@ -148,23 +198,31 @@ export function ChatThread({ conversationId, meId, other, otherActive, initialPa
     nearBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < NEAR_BOTTOM_PX;
   }
 
+  // Sends the desired state, not a toggle, so repeated taps and polls converge.
   async function toggleHeart(id: string) {
-    const flip = (m: ChatMessage, on: boolean) =>
-      m.id !== id
-        ? m
-        : { ...m, heartedBy: on ? [...m.heartedBy.filter((u) => u !== meId), meId] : m.heartedBy.filter((u) => u !== meId) };
     const target = messages.find((m) => m.id === id);
     if (!target) return;
-    const wasHearted = target.heartedBy.includes(meId);
-    setMessages((cur) => cur.map((m) => flip(m, !wasHearted)));
+    const want = !target.heartedBy.includes(meId);
+    const seq = ++heartSeq.current;
+    const apply = (on: boolean) =>
+      setMessages((cur) => cur.map((m) => (m.id === id ? withMyHeart(m, meId, on) : m)));
+    hearts.current.set(id, { hearted: want, inFlight: true, seq });
+    apply(want);
+    let settled = !want;
     try {
-      const res = await fetch(`/api/chat/messages/${id}/heart`, { method: "POST" });
+      const res = await fetch(`/api/chat/messages/${id}/heart`, {
+        method: "POST",
+        body: JSON.stringify({ hearted: want }),
+      });
       if (!res.ok) throw new Error("bad response");
-      const { hearted } = (await res.json()) as { hearted: boolean };
-      setMessages((cur) => cur.map((m) => flip(m, hearted)));
+      settled = ((await res.json()) as { hearted: boolean }).hearted;
     } catch {
-      setMessages((cur) => cur.map((m) => flip(m, wasHearted)));
+      // Failed: settle back on the state before the tap.
     }
+    // A newer tap on the same message owns its state now.
+    if (hearts.current.get(id)?.seq !== seq) return;
+    hearts.current.set(id, { hearted: settled, inFlight: false, seq });
+    apply(settled);
   }
 
   /**
@@ -231,12 +289,6 @@ export function ChatThread({ conversationId, meId, other, otherActive, initialPa
       setSending(false);
     }
   }
-
-  const myLatest = [...messages].reverse().find((m) => m.senderId === meId);
-  const seenId =
-    myLatest && otherLastReadAt && new Date(otherLastReadAt).getTime() >= new Date(myLatest.createdAt).getTime()
-      ? myLatest.id
-      : null;
 
   return (
     <main

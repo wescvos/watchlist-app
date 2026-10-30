@@ -238,9 +238,12 @@ export async function sendTitle(
   return { conversationIds };
 }
 
-export async function toggleHeart(
+// Sets, rather than toggles, the viewer's heart so a repeated or concurrent
+// request lands on the state the client asked for and never conflicts.
+export async function setHeart(
   userId: string,
   messageId: string,
+  hearted: boolean,
 ): Promise<{ hearted: boolean } | null> {
   const message = await prisma.message.findUnique({
     where: { id: messageId },
@@ -249,14 +252,17 @@ export async function toggleHeart(
   const c = message?.conversation;
   if (!message || !c || (c.userAId !== userId && c.userBId !== userId)) return null;
 
-  const key = { messageId_userId: { messageId, userId } };
-  const existing = await prisma.reaction.findUnique({ where: key, select: { id: true } });
-  if (existing) {
-    // deleteMany tolerates a concurrent un-heart from a second tap.
-    await prisma.reaction.deleteMany({ where: { messageId, userId } });
-    return { hearted: false };
-  }
   // Hearts are quiet: deliberately no lastMessageAt or read-state change.
-  await prisma.reaction.create({ data: { messageId, userId } });
-  return { hearted: true };
+  if (hearted) {
+    // update: {} makes a double-tap's second create a harmless read.
+    await prisma.reaction.upsert({
+      where: { messageId_userId: { messageId, userId } },
+      create: { messageId, userId },
+      update: {},
+    });
+  } else {
+    // deleteMany tolerates there being nothing left to delete.
+    await prisma.reaction.deleteMany({ where: { messageId, userId } });
+  }
+  return { hearted };
 }
