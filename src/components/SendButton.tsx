@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
+import { Avatar } from "@/components/Avatar";
 
 interface Person {
   id: string;
@@ -17,30 +18,6 @@ interface Props {
 
 const OUTLINE_BUTTON =
   "rounded-lg border border-black/12 px-3 py-2 text-sm font-medium transition-colors hover:bg-gray-100 active:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground disabled:opacity-50 dark:border-white/15 dark:hover:bg-white/10 dark:active:bg-white/10";
-
-function Avatar({ person }: { person: Person }) {
-  const [failed, setFailed] = useState(false);
-  if (person.image && !failed) {
-    return (
-      // eslint-disable-next-line @next/next/no-img-element
-      <img
-        src={person.image}
-        alt=""
-        referrerPolicy="no-referrer"
-        onError={() => setFailed(true)}
-        className="h-9 w-9 shrink-0 rounded-full object-cover"
-      />
-    );
-  }
-  return (
-    <span
-      aria-hidden="true"
-      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gray-200 text-sm font-medium dark:bg-white/15"
-    >
-      {person.firstName.charAt(0).toUpperCase()}
-    </span>
-  );
-}
 
 export function SendButton({ tmdbId, mediaType, titleName, className = "" }: Props) {
   const [open, setOpen] = useState(false);
