@@ -3,6 +3,7 @@ import { Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } f
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AccountMenu } from "@/components/AccountMenu";
+import { ChatIcon } from "@/components/ChatIcon";
 import { ListToggle } from "@/components/ListToggle";
 import { TitleCard, type CardTitle } from "@/components/TitleCard";
 import type { MediaKind } from "@/lib/types";
@@ -369,6 +370,7 @@ export default function Home() {
         <h1 className="text-lg font-semibold">Watchlist</h1>
         <div className="flex shrink-0 items-center gap-1.5">
           <AccountMenu />
+          <ChatIcon />
           {/* Secondary entry ("Mood"): subdued ghost styling so the solid
               "+ Add" pill stays the primary action. An action, not a list tab.
               Landed in the same commit as /mood itself, so no deployed state
