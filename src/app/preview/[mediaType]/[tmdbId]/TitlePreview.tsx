@@ -84,7 +84,7 @@ export function TitlePreview({ title }: { title: MergedTitle }) {
         >
           {adding === "WATCHED" ? "Adding…" : "Watched"}
         </button>
-        <SendButton tmdbId={title.tmdbId} mediaType={title.mediaType} titleName={title.title} className="flex-1 py-3" />
+        <SendButton tmdbId={title.tmdbId} mediaType={title.mediaType} titleName={title.title} size="lg" className="flex-1" />
       </div>
     </main>
   );

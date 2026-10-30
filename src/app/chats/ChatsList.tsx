@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { BackLink } from "@/components/BackLink";
@@ -35,10 +35,9 @@ export function ChatsList() {
 
   const load = useCallback(async () => {
     try {
-      const [cRes, pRes] = await Promise.all([fetch("/api/chat/conversations"), fetch("/api/chat/people")]);
-      if (!cRes.ok || !pRes.ok) throw new Error("bad response");
-      setConversations((await cRes.json()) as Conversation[]);
-      setPeople((await pRes.json()) as Person[]);
+      const res = await fetch("/api/chat/conversations");
+      if (!res.ok) throw new Error("bad response");
+      setConversations((await res.json()) as Conversation[]);
       setError(false);
     } catch {
       // Keep showing the last good list on a failed poll; only surface the
@@ -46,6 +45,25 @@ export function ChatsList() {
       setError(true);
     }
   }, []);
+
+  // People change rarely, so they load on mount and after starting a chat
+  // rather than on every poll. A failure just leaves "Start a new chat" empty;
+  // the chats still show.
+  const [peopleKey, setPeopleKey] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/chat/people")
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error("bad response"))))
+      .then((data: Person[]) => {
+        if (!cancelled) setPeople(data);
+      })
+      .catch(() => {
+        if (!cancelled) setPeople([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [peopleKey]);
 
   usePolling(load, 10000);
 
@@ -60,6 +78,7 @@ export function ChatsList() {
       });
       if (!res.ok) throw new Error("bad response");
       const { id } = (await res.json()) as { id: string };
+      setPeopleKey((k) => k + 1);
       router.push(`/chats/${id}`);
     } catch {
       setStartError("Couldn't start the chat. Please try again.");

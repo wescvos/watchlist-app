@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 
 const push = vi.fn();
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
@@ -18,13 +18,14 @@ const people = [
 ];
 
 let fetchMock: ReturnType<typeof vi.fn>;
-function mockFetch(c: unknown, p: unknown = people, ok = true) {
+function mockFetch(c: unknown, p: unknown = people, ok = true, peopleOk = ok) {
   fetchMock = vi.fn((url: string, init?: RequestInit) => {
     if (init?.method === "POST") {
       return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ id: "new1" }) });
     }
-    const body = url === "/api/chat/people" ? p : c;
-    return Promise.resolve({ ok, status: ok ? 200 : 500, json: () => Promise.resolve(body) });
+    const isPeople = url === "/api/chat/people";
+    const good = isPeople ? peopleOk : ok;
+    return Promise.resolve({ ok: good, status: good ? 200 : 500, json: () => Promise.resolve(isPeople ? p : c) });
   });
   vi.stubGlobal("fetch", fetchMock);
 }
@@ -70,5 +71,29 @@ describe("ChatsList", () => {
     mockFetch(convos);
     fireEvent.click(retry);
     await screen.findByText("Watch The Matrix");
+  });
+
+  it("loads people once on mount, not on every poll", async () => {
+    mockFetch(convos);
+    render(<ChatsList />);
+    await screen.findByText("Start a new chat");
+    const calls = (url: string) => fetchMock.mock.calls.filter((c) => c[0] === url).length;
+    for (let i = 0; i < 2; i++) {
+      await act(async () => {
+        document.dispatchEvent(new Event("visibilitychange"));
+      });
+    }
+    await waitFor(() => expect(calls("/api/chat/conversations")).toBe(3));
+    expect(calls("/api/chat/people")).toBe(1);
+  });
+
+  it("still shows the chats when loading people fails", async () => {
+    mockFetch(convos, people, true, false);
+    render(<ChatsList />);
+    await screen.findByText("Watch The Matrix");
+    await waitFor(() => expect(fetchMock.mock.calls.some((c) => c[0] === "/api/chat/people")).toBe(true));
+    await act(async () => {});
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByText("Start a new chat")).toBeNull();
   });
 });

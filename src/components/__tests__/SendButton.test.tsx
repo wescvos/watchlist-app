@@ -46,7 +46,9 @@ describe("SendButton", () => {
     expect(screen.getByText("Bram")).toBeInTheDocument();
     expect(document.querySelector('img[src="https://example.com/a.jpg"]')).not.toBeNull();
     expect(screen.getByText("B")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Send to 1 person" })).toBeDisabled();
+    // Nothing ticked yet: a plain, disabled Send.
+    const submit = screen.getAllByRole("button", { name: "Send" }).find((b) => b.closest('[role="dialog"]'));
+    expect(submit).toBeDisabled();
   });
 
   it("enables the submit button with the count of ticked people", async () => {
@@ -56,6 +58,19 @@ describe("SendButton", () => {
     expect(screen.getByRole("button", { name: "Send to 1 person" })).toBeEnabled();
     fireEvent.click(screen.getByLabelText("Bram"));
     expect(screen.getByRole("button", { name: "Send to 2 people" })).toBeEnabled();
+    fireEvent.click(screen.getByLabelText("Cleo"));
+    expect(screen.getByRole("button", { name: "Send to 3 people" })).toBeEnabled();
+  });
+
+  it("sizes the trigger by prop, not by a className override", () => {
+    const { rerender } = render(<SendButton tmdbId={1} mediaType="TV" titleName="X" />);
+    const trigger = screen.getByRole("button", { name: "Send" });
+    expect(trigger.className.split(" ")).toContain("py-2");
+    expect(trigger.className.split(" ")).not.toContain("py-3");
+    rerender(<SendButton tmdbId={1} mediaType="TV" titleName="X" size="lg" className="flex-1" />);
+    expect(trigger.className.split(" ")).toContain("py-3");
+    expect(trigger.className.split(" ")).not.toContain("py-2");
+    expect(trigger.className.split(" ")).toContain("flex-1");
   });
 
   it("posts the payload, omits blank text, and closes with Sent", async () => {

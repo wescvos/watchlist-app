@@ -14,12 +14,14 @@ interface Props {
   titleName: string;
   /** Extra classes for the trigger button (for example "flex-1" in a button row). */
   className?: string;
+  /** "lg" matches the taller Want/Watched buttons on the preview page. */
+  size?: "md" | "lg";
 }
 
 const OUTLINE_BUTTON =
-  "rounded-lg border border-black/12 px-3 py-2 text-sm font-medium transition-colors hover:bg-gray-100 active:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground disabled:opacity-50 dark:border-white/15 dark:hover:bg-white/10 dark:active:bg-white/10";
+  "rounded-lg border border-black/12 px-3 text-sm font-medium transition-colors hover:bg-gray-100 active:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-foreground disabled:opacity-50 dark:border-white/15 dark:hover:bg-white/10 dark:active:bg-white/10";
 
-export function SendButton({ tmdbId, mediaType, titleName, className = "" }: Props) {
+export function SendButton({ tmdbId, mediaType, titleName, className = "", size = "md" }: Props) {
   const [open, setOpen] = useState(false);
   const [people, setPeople] = useState<Person[] | null>(null);
   const [loadError, setLoadError] = useState("");
@@ -105,7 +107,7 @@ export function SendButton({ tmdbId, mediaType, titleName, className = "" }: Pro
   }
 
   const count = selected.length;
-  const submitLabel = count === 2 || count > 2 ? `Send to ${count} people` : "Send to 1 person";
+  const submitLabel = count === 0 ? "Send" : count === 1 ? "Send to 1 person" : `Send to ${count} people`;
 
   return (
     <>
@@ -117,7 +119,7 @@ export function SendButton({ tmdbId, mediaType, titleName, className = "" }: Pro
           setOpen(true);
         }}
         aria-haspopup="dialog"
-        className={`${OUTLINE_BUTTON} ${className}`}
+        className={`${OUTLINE_BUTTON} ${size === "lg" ? "py-3" : "py-2"} ${className}`}
       >
         Send
       </button>
