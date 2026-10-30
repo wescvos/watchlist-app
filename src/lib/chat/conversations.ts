@@ -81,18 +81,20 @@ const memberWhere = (userId: string) => ({
   OR: [{ userAId: userId }, { userBId: userId }],
 });
 
-// Latest message from the other person per conversation. Unread is defined by
-// their messages only, so my own sends never make a chat unread for me.
-async function latestFromOthers(userId: string, ids: string[]) {
-  const rows = await prisma.message.findMany({
-    where: { conversationId: { in: ids }, senderId: { not: userId } },
+// Latest message from the other person in one conversation. Unread is defined
+// by their messages only, so my own sends never make a chat unread for me. One
+// bounded lookup per conversation (there are only a handful of users), so
+// unread never scans a chat's history.
+async function latestFromOther(userId: string, conversationId: string) {
+  const m = await prisma.message.findFirst({
+    where: { conversationId, senderId: { not: userId } },
     orderBy: { createdAt: "desc" },
-    distinct: ["conversationId"],
-    select: { conversationId: true, createdAt: true },
+    select: { createdAt: true },
   });
-  return new Map(rows.map((r) => [r.conversationId, r.createdAt]));
+  return m?.createdAt;
 }
 
+// A message exactly at my lastReadAt counts as read.
 function isUnread(theirLatest: Date | undefined, myLastReadAt: Date | null) {
   if (!theirLatest) return false;
   return !myLastReadAt || theirLatest > myLastReadAt;
@@ -101,41 +103,43 @@ function isUnread(theirLatest: Date | undefined, myLastReadAt: Date | null) {
 export async function listConversations(userId: string): Promise<ConversationSummary[]> {
   const convs = await prisma.conversation.findMany({
     where: memberWhere(userId),
-    include: {
-      userA: { select: userSelect },
-      userB: { select: userSelect },
-      // Latest message only; reactions live in another table and never count.
-      messages: {
-        orderBy: { createdAt: "desc" },
-        take: 1,
-        select: { senderId: true, createdAt: true, text: true, title: { select: { title: true } } },
-      },
-    },
+    include: { userA: { select: userSelect }, userB: { select: userSelect } },
     orderBy: { lastMessageAt: "desc" },
   });
-  const withMessages = convs.filter((c) => c.messages.length > 0);
-  if (withMessages.length === 0) return [];
-  const theirs = await latestFromOthers(
-    userId,
-    withMessages.map((c) => c.id),
+  const rows = await Promise.all(
+    convs.map(async (c) => {
+      const [last, theirLatest] = await Promise.all([
+        // Latest message only, for the preview; reactions live in another
+        // table and never count.
+        prisma.message.findFirst({
+          where: { conversationId: c.id },
+          orderBy: { createdAt: "desc" },
+          select: { senderId: true, text: true, title: { select: { title: true } } },
+        }),
+        latestFromOther(userId, c.id),
+      ]);
+      return { c, last, theirLatest };
+    }),
   );
 
-  return withMessages
-    .map((c) => {
+  return rows
+    .flatMap(({ c, last, theirLatest }) => {
+      if (!last) return [];
       const v = viewFor(userId, c)!;
-      const last = c.messages[0];
       const mine = last.senderId === userId;
       const preview = last.title
         ? `${mine ? "You" : v.other.firstName} sent ${last.title.title}`
         : (last.text ?? "");
-      return {
-        id: c.id,
-        other: v.other,
-        otherActive: v.otherActive,
-        lastMessageAt: c.lastMessageAt.toISOString(),
-        preview,
-        unread: isUnread(theirs.get(c.id), v.myLastReadAt),
-      };
+      return [
+        {
+          id: c.id,
+          other: v.other,
+          otherActive: v.otherActive,
+          lastMessageAt: c.lastMessageAt.toISOString(),
+          preview,
+          unread: isUnread(theirLatest, v.myLastReadAt),
+        },
+      ];
     })
     .sort((a, b) => b.lastMessageAt.localeCompare(a.lastMessageAt));
 }
@@ -158,12 +162,13 @@ export async function unreadCount(userId: string): Promise<number> {
     where: memberWhere(userId),
     select: { id: true, userAId: true, userALastReadAt: true, userBLastReadAt: true },
   });
-  if (convs.length === 0) return 0;
-  const theirs = await latestFromOthers(
-    userId,
-    convs.map((c) => c.id),
+  const unread = await Promise.all(
+    convs.map(async (c) =>
+      isUnread(
+        await latestFromOther(userId, c.id),
+        c.userAId === userId ? c.userALastReadAt : c.userBLastReadAt,
+      ),
+    ),
   );
-  return convs.filter((c) =>
-    isUnread(theirs.get(c.id), c.userAId === userId ? c.userALastReadAt : c.userBLastReadAt),
-  ).length;
+  return unread.filter(Boolean).length;
 }
