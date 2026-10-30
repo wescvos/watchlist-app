@@ -65,6 +65,63 @@ describe("usePolling", () => {
     expect(second).toHaveBeenCalledTimes(1);
   });
 
+  it("pauses after 10 minutes without input and resumes at once on the next input", async () => {
+    const cb = vi.fn();
+    renderHook(() => usePolling(cb, 3000));
+    await act(async () => { await vi.advanceTimersByTimeAsync(10 * 60_000); });
+    const atCutoff = cb.mock.calls.length;
+    // Mount plus every tick strictly inside the 10 minutes.
+    expect(atCutoff).toBe(200);
+    await act(async () => { await vi.advanceTimersByTimeAsync(5 * 60_000); });
+    expect(cb).toHaveBeenCalledTimes(atCutoff);
+
+    act(() => { window.dispatchEvent(new Event("pointerdown")); });
+    expect(cb).toHaveBeenCalledTimes(atCutoff + 1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+    expect(cb).toHaveBeenCalledTimes(atCutoff + 2);
+  });
+
+  it("counts keys, touches and scrolls in any element as activity", async () => {
+    const cb = vi.fn();
+    renderHook(() => usePolling(cb, 3000));
+    const inner = document.createElement("div");
+    document.body.appendChild(inner);
+    for (const fire of [
+      () => window.dispatchEvent(new Event("keydown")),
+      () => window.dispatchEvent(new Event("touchstart")),
+      // scroll does not bubble, so an inner scroller must still count.
+      () => inner.dispatchEvent(new Event("scroll")),
+    ]) {
+      await act(async () => { await vi.advanceTimersByTimeAsync(9 * 60_000); });
+      act(fire);
+    }
+    // Never idle: 27 minutes of steady ticks plus mount.
+    expect(cb).toHaveBeenCalledTimes(1 + (27 * 60_000) / 3000);
+    inner.remove();
+  });
+
+  it("resumes when the page becomes visible again after idling", async () => {
+    const cb = vi.fn();
+    renderHook(() => usePolling(cb, 3000));
+    await act(async () => { await vi.advanceTimersByTimeAsync(11 * 60_000); });
+    const count = cb.mock.calls.length;
+    act(() => setVisibility("hidden"));
+    act(() => setVisibility("visible"));
+    expect(cb).toHaveBeenCalledTimes(count + 1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(3000); });
+    expect(cb).toHaveBeenCalledTimes(count + 2);
+  });
+
+  it("does not resume on input after unmount", async () => {
+    const cb = vi.fn();
+    const { unmount } = renderHook(() => usePolling(cb, 3000));
+    await act(async () => { await vi.advanceTimersByTimeAsync(11 * 60_000); });
+    const count = cb.mock.calls.length;
+    unmount();
+    act(() => { window.dispatchEvent(new Event("pointerdown")); });
+    expect(cb).toHaveBeenCalledTimes(count);
+  });
+
   it("makes no calls when disabled", async () => {
     const cb = vi.fn();
     renderHook(() => usePolling(cb, 3000, false));
