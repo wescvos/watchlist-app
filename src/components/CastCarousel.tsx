@@ -5,7 +5,13 @@ export function CastCarousel({ cast }: { cast: CastMember[] }) {
   return (
     <div className="mt-4">
       <h2 className="text-sm font-medium">Cast</h2>
-      <div className="-mx-4 mt-2 flex snap-x snap-mandatory gap-4 overflow-x-auto touch-pan-x overscroll-x-contain scrollbar-hide px-4 pb-1 [-webkit-overflow-scrolling:touch]">
+      {/* No touch-action restriction: the browser picks the axis from the
+          swipe, so a horizontal swipe scrolls the cast and a vertical one
+          scrolls the page. touch-pan-x here once swallowed vertical swipes. */}
+      <div
+        data-testid="cast-scroller"
+        className="-mx-4 mt-2 flex snap-x snap-mandatory gap-4 overflow-x-auto overscroll-x-contain scrollbar-hide px-4 pb-1 [-webkit-overflow-scrolling:touch]"
+      >
         {cast.map((c, i) => (
           <div key={i} className="flex w-24 flex-shrink-0 snap-start flex-col items-center">
             <div className="aspect-[2/3] w-24 flex-shrink-0 overflow-hidden rounded-lg bg-gray-200 ring-1 ring-black/5 dark:bg-white/10 dark:ring-white/10">
