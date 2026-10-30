@@ -59,14 +59,13 @@ Sign-in is Google only. Create an OAuth client (Web application) in the Google C
 
 ## Adding a friend
 
-1. In Vercel, open the project's Environment Variables and add their email to `ALLOWED_EMAILS` (comma separated, e.g. `you@example.com,friend@example.com`).
-2. Redeploy so the new value takes effect.
+1. In Google Cloud, open Google Auth Platform, then Audience, and add their Google address under **Test users**. The OAuth app stays in Testing mode, which only lets listed test users sign in.
+2. In Vercel, open the project's Environment Variables and add their email to `ALLOWED_EMAILS` (comma separated, e.g. `you@example.com,friend@example.com`).
+3. Redeploy so the new value takes effect.
 
 Each person gets their own list over a shared title catalog. To remove someone, delete their email from `ALLOWED_EMAILS` and redeploy: they are signed out and cannot sign back in.
 
-## Rolling back release 1
-
-The `ListEntry` to `Title` foreign key is `ON DELETE RESTRICT`, so the pre-multi-user code's Remove (`prisma.title.delete`) fails with `P2003` against the migrated database, both while the deploy is in flight and after any revert of release 1. If release 1 is reverted, first run (after reading it) `ALTER TABLE "ListEntry" DROP CONSTRAINT "ListEntry_titleId_fkey";` so the old Remove works again. Also, don't add, edit or remove titles while the release-1 deploy is building.
+Deployments from before the `drop_title_personal_columns` migration cannot be promoted or rolled back to: their code queries `Title` columns that no longer exist.
 
 ## Local setup
 

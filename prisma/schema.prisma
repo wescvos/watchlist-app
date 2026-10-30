@@ -49,18 +49,8 @@ model Title {
   metacriticScore  String?
   fetchedAt        DateTime  @default(now())
 
-  // RELEASE 1 LEFTOVERS: the personal columns below moved to ListEntry, which
-  // now owns them per user. They stay on Title for one release so the previous
-  // deploy keeps working against the migrated database, and are dropped in
-  // release 2. No new code reads or writes them.
-  status    Status    @default(WANT)
-  note      String?
-  myRating  Int?
-  pinned    Boolean   @default(false)
-  pinnedAt  DateTime?
-  addedAt   DateTime  @default(now())
-  watchedAt DateTime?
-
+  // Personal data (status, note, rating, pin, dates) lives on ListEntry, per
+  // user. Title is the shared catalog only.
   entries ListEntry[]
 
   @@unique([tmdbId, mediaType])
