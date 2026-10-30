@@ -6,10 +6,11 @@ import { TitleHeader } from "@/components/TitleHeader";
 import { ExternalRatings } from "@/components/ExternalRatings";
 import { CastCarousel } from "@/components/CastCarousel";
 import { WatchProviders } from "@/components/WatchProviders";
+import { SendButton } from "@/components/SendButton";
 import type { CastMember, WatchProvider } from "@/lib/types";
 
 interface Title {
-  id: string; title: string; year: number | null; posterUrl: string | null; backdropUrl: string | null;
+  id: string; tmdbId: number; title: string; year: number | null; posterUrl: string | null; backdropUrl: string | null;
   mediaType: "MOVIE" | "TV"; numberOfSeasons: number | null; numberOfEpisodes: number | null;
   overview: string | null; tagline: string | null; runtime: number | null; genres: string[];
   spokenLanguages: string[];
@@ -205,6 +206,10 @@ export function TitleDetail({ title }: { title: Title }) {
         spokenLanguages={title.spokenLanguages}
         watchedDate={status === "WATCHED" && watchedAt ? formatWatchedDate(watchedAt) : null}
       />
+
+      <div className="mt-4 flex items-center gap-2">
+        <SendButton tmdbId={title.tmdbId} mediaType={title.mediaType} titleName={title.title} />
+      </div>
 
       {/* Rating only makes sense once watched — prompt to mark it watched instead. */}
       {status === "WANT" && (

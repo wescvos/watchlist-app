@@ -6,6 +6,7 @@ import { TitleHeader } from "@/components/TitleHeader";
 import { ExternalRatings } from "@/components/ExternalRatings";
 import { CastCarousel } from "@/components/CastCarousel";
 import { WatchProviders } from "@/components/WatchProviders";
+import { SendButton } from "@/components/SendButton";
 import type { MergedTitle } from "@/lib/fetchTitle";
 
 export function TitlePreview({ title }: { title: MergedTitle }) {
@@ -83,6 +84,7 @@ export function TitlePreview({ title }: { title: MergedTitle }) {
         >
           {adding === "WATCHED" ? "Adding…" : "Watched"}
         </button>
+        <SendButton tmdbId={title.tmdbId} mediaType={title.mediaType} titleName={title.title} className="flex-1 py-3" />
       </div>
     </main>
   );
