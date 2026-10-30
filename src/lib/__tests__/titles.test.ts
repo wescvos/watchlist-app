@@ -29,6 +29,7 @@ import {
   getTitle,
   deleteTitle,
   getCatalogTitle,
+  ensureCatalogTitle,
 } from "@/lib/titles";
 import { Status } from "@prisma/client";
 
@@ -227,5 +228,31 @@ describe("getCatalogTitle", () => {
     expect(await getCatalogTitle("t1")).toEqual({ tmdbId: 1, mediaType: "MOVIE" });
     mocked(prisma.title.findUnique).mockResolvedValue(null);
     expect(await getCatalogTitle("nope")).toBeNull();
+  });
+});
+
+describe("ensureCatalogTitle", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("returns the catalog row without fetching on a hit", async () => {
+    vi.mocked(prisma.title.findUnique).mockResolvedValue(titleRow as never);
+    const t = await ensureCatalogTitle(1, "MOVIE");
+    expect(t).toBe(titleRow);
+    expect(fetchMergedTitle).not.toHaveBeenCalled();
+    expect(prisma.title.upsert).not.toHaveBeenCalled();
+  });
+
+  it("fetches and upserts with an empty update on a miss", async () => {
+    vi.mocked(prisma.title.findUnique).mockResolvedValue(null);
+    vi.mocked(fetchMergedTitle).mockResolvedValue(merged as never);
+    vi.mocked(prisma.title.upsert).mockResolvedValue(titleRow as never);
+    await ensureCatalogTitle(1, "MOVIE");
+    expect(fetchMergedTitle).toHaveBeenCalledWith(1, "MOVIE");
+    expect(prisma.title.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { tmdbId_mediaType: { tmdbId: 1, mediaType: "MOVIE" } },
+        update: {},
+      }),
+    );
   });
 });

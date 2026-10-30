@@ -78,25 +78,30 @@ function isNotFound(e: unknown): boolean {
   return e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2025";
 }
 
+// Shared by addTitle and sending a movie in chat: both need the catalog row
+// to exist before anything can reference it.
+export async function ensureCatalogTitle(tmdbId: number, mediaType: MediaKind): Promise<Title> {
+  const existing = await prisma.title.findUnique({
+    where: { tmdbId_mediaType: { tmdbId, mediaType } },
+  });
+  if (existing) return existing;
+  const merged = await fetchMergedTitle(tmdbId, mediaType);
+  // Upsert (not create) so a concurrent add of the same title by another
+  // user resolves to the existing row instead of a unique violation.
+  return prisma.title.upsert({
+    where: { tmdbId_mediaType: { tmdbId, mediaType } },
+    update: {},
+    create: toData(merged),
+  });
+}
+
 export async function addTitle(
   userId: string,
   tmdbId: number,
   mediaType: MediaKind,
   status: Status = Status.WANT,
 ): Promise<ListedTitle> {
-  let title = await prisma.title.findUnique({
-    where: { tmdbId_mediaType: { tmdbId, mediaType } },
-  });
-  if (!title) {
-    const merged = await fetchMergedTitle(tmdbId, mediaType);
-    // Upsert (not create) so a concurrent add of the same title by another
-    // user resolves to the existing row instead of a unique violation.
-    title = await prisma.title.upsert({
-      where: { tmdbId_mediaType: { tmdbId, mediaType } },
-      update: {},
-      create: toData(merged),
-    });
-  }
+  const title = await ensureCatalogTitle(tmdbId, mediaType);
   const entry = await prisma.listEntry.upsert({
     where: { userId_titleId: { userId, titleId: title.id } },
     // Empty update: re-adding a title you already have leaves it intact.
