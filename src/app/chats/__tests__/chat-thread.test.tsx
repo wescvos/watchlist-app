@@ -95,6 +95,35 @@ describe("ChatTitleCard", () => {
 });
 
 describe("ChatThread", () => {
+  it("pins itself to the visible area so the input bar follows the keyboard", () => {
+    class FakeVV extends EventTarget {
+      height = 800;
+      offsetTop = 0;
+    }
+    const vv = new FakeVV();
+    Object.defineProperty(window, "visualViewport", { value: vv, configurable: true });
+    Object.defineProperty(window, "innerHeight", { value: 800, configurable: true });
+    mockFetch(() => undefined);
+    try {
+      renderThread(page([msg(1)]));
+      const main = screen.getByTestId("chat-thread");
+      expect(main.className).toContain("fixed");
+      expect(main.style.height).toBe("800px");
+
+      act(() => {
+        vv.height = 450;
+        vv.offsetTop = 100;
+        vv.dispatchEvent(new Event("resize"));
+      });
+      expect(main.style.height).toBe("450px");
+      expect(main.style.top).toBe("100px");
+      // Keyboard open: no home-indicator gap between the input and the keyboard.
+      expect(main.style.paddingBottom).toBe("0px");
+    } finally {
+      Object.defineProperty(window, "visualViewport", { value: undefined, configurable: true });
+    }
+  });
+
   it("shows Seen only under my latest message, and only once read", () => {
     const messages = [msg(1), msg(2), msg(3), msg(4)];
     mockFetch((url) => (url.endsWith("/messages") ? { body: page(messages) } : undefined));

@@ -5,6 +5,7 @@ import { BackLink } from "@/components/BackLink";
 import { Avatar } from "@/components/Avatar";
 import { ChatTitleCard, chatTitleHref } from "@/components/ChatTitleCard";
 import { usePolling } from "@/lib/usePolling";
+import { useVisualViewport } from "@/lib/useVisualViewport";
 import type { ChatMessage, ChatPage } from "@/lib/chat/messages";
 import type { Person } from "@/lib/chat/people";
 
@@ -192,6 +193,16 @@ export function ChatThread({ conversationId, meId, other, otherActive, initialPa
     if (el && nearBottom.current) el.scrollTop = el.scrollHeight;
   }, [newestId, pending.length, seenId]);
 
+  const visible = useVisualViewport();
+
+  // The keyboard opening or closing resizes the visible area; a reader at the
+  // bottom should stay at the bottom rather than have the newest messages
+  // hidden behind the keyboard.
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (el && nearBottom.current) el.scrollTop = el.scrollHeight;
+  }, [visible?.height]);
+
   function onScroll() {
     const el = scrollRef.current;
     if (!el) return;
@@ -291,9 +302,19 @@ export function ChatThread({ conversationId, meId, other, otherActive, initialPa
   }
 
   return (
+    // A fixed layer pinned to the visible area, so the page itself never
+    // scrolls: the input bar stays on the keyboard (or the bottom edge) and a
+    // swipe in the message list can't drag the whole screen.
     <main
-      className="mx-auto flex w-full max-w-2xl flex-col"
-      style={{ height: "calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom))" }}
+      data-testid="chat-thread"
+      className="fixed inset-x-0 z-10 mx-auto flex w-full max-w-2xl flex-col bg-background"
+      style={{
+        top: visible ? visible.offsetTop : 0,
+        height: visible ? visible.height : "100dvh",
+        paddingTop: "env(safe-area-inset-top)",
+        // The home-indicator gap only matters with the keyboard closed.
+        paddingBottom: visible?.keyboardOpen ? 0 : "env(safe-area-inset-bottom)",
+      }}
     >
       <header className="flex shrink-0 items-center gap-2 border-b border-black/10 px-4 py-2 dark:border-white/10">
         <BackLink href="/chats" label="Back to chats" />
@@ -301,7 +322,7 @@ export function ChatThread({ conversationId, meId, other, otherActive, initialPa
         <h1 className="truncate text-base font-semibold tracking-tight">{other.firstName}</h1>
       </header>
 
-      <div ref={scrollRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+      <div ref={scrollRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-3">
         {hasEarlier && (
           <div className="mb-3 flex flex-col items-center">
             <button
